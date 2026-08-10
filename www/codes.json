@@ -1,0 +1,1406 @@
+[
+    {
+        "code": "BB1B",
+        "description": "BB1B - BIELSKO-BIAŁA"
+    },
+    {
+        "code": "BB1C",
+        "description": "BB1C - CIESZYN"
+    },
+    {
+        "code": "BB1Z",
+        "description": "BB1Z - ŻYWIEC"
+    },
+    {
+        "code": "BI1B",
+        "description": "BI1B - BIAŁYSTOK"
+    },
+    {
+        "code": "BI1P",
+        "description": "BI1P - BIELSK PODLASKI"
+    },
+    {
+        "code": "BI1S",
+        "description": "BI1S - SOKÓŁKA"
+    },
+    {
+        "code": "BI2P",
+        "description": "BI2P - HAJNÓWKA"
+    },
+    {
+        "code": "BI3P",
+        "description": "BI3P - SIEMIATYCZE"
+    },
+    {
+        "code": "BY1B",
+        "description": "BY1B - BYDGOSZCZ"
+    },
+    {
+        "code": "BY1I",
+        "description": "BY1I - INOWROCŁAW"
+    },
+    {
+        "code": "BY1M",
+        "description": "BY1M - MOGILNO"
+    },
+    {
+        "code": "BY1N",
+        "description": "BY1N - NAKŁO NAD NOTECIĄ"
+    },
+    {
+        "code": "BY1S",
+        "description": "BY1S - ŚWIECIE"
+    },
+    {
+        "code": "BY1T",
+        "description": "BY1T - TUCHOLA"
+    },
+    {
+        "code": "BY1U",
+        "description": "BY1U - SZUBIN"
+    },
+    {
+        "code": "BY1Z",
+        "description": "BY1Z - ŻNIN"
+    },
+    {
+        "code": "BY2T",
+        "description": "BY2T - SĘPÓLNO KRAJEŃSKIE"
+    },
+    {
+        "code": "CIKW",
+        "description": "CIKW - WARSZAWA"
+    },
+    {
+        "code": "CZ1C",
+        "description": "CZ1C - CZĘSTOCHOWA"
+    },
+    {
+        "code": "CZ1L",
+        "description": "CZ1L - LUBLINIEC"
+    },
+    {
+        "code": "CZ1M",
+        "description": "CZ1M - MYSZKÓW"
+    },
+    {
+        "code": "CZ1Z",
+        "description": "CZ1Z - ZAWIERCIE"
+    },
+    {
+        "code": "CZ2C",
+        "description": "CZ2C - KŁOBUCK"
+    },
+    {
+        "code": "DIRS",
+        "description": "DIRS - ŻŻ DIRS"
+    },
+    {
+        "code": "EL1B",
+        "description": "EL1B - BRANIEWO"
+    },
+    {
+        "code": "EL1D",
+        "description": "EL1D - DZIAŁDOWO"
+    },
+    {
+        "code": "EL1E",
+        "description": "EL1E - ELBLĄG"
+    },
+    {
+        "code": "EL1I",
+        "description": "EL1I - IŁAWA"
+    },
+    {
+        "code": "EL1N",
+        "description": "EL1N - NOWE MIASTO LUBAWSKIE"
+    },
+    {
+        "code": "EL1O",
+        "description": "EL1O - OSTRÓDA"
+    },
+    {
+        "code": "EL2O",
+        "description": "EL2O - MORĄG"
+    },
+    {
+        "code": "GD1A",
+        "description": "GD1A - STAROGARD GDAŃSKI"
+    },
+    {
+        "code": "GD1E",
+        "description": "GD1E - KOŚCIERZYNA"
+    },
+    {
+        "code": "GD1G",
+        "description": "GD1G - GDAŃSK"
+    },
+    {
+        "code": "GD1I",
+        "description": "GD1I - KWIDZYN"
+    },
+    {
+        "code": "GD1M",
+        "description": "GD1M - MALBORK"
+    },
+    {
+        "code": "GD1R",
+        "description": "GD1R - KARTUZY"
+    },
+    {
+        "code": "GD1S",
+        "description": "GD1S - SOPOT"
+    },
+    {
+        "code": "GD1T",
+        "description": "GD1T - TCZEW"
+    },
+    {
+        "code": "GD1W",
+        "description": "GD1W - WEJHEROWO"
+    },
+    {
+        "code": "GD1Y",
+        "description": "GD1Y - GDYNIA"
+    },
+    {
+        "code": "GD2I",
+        "description": "GD2I - SZTUM"
+    },
+    {
+        "code": "GD2M",
+        "description": "GD2M - NOWY DWÓR GDAŃSKI"
+    },
+    {
+        "code": "GD2W",
+        "description": "GD2W - PUCK"
+    },
+    {
+        "code": "GL1G",
+        "description": "GL1G - GLIWICE"
+    },
+    {
+        "code": "GL1J",
+        "description": "GL1J - JASTRZĘBIE-ZDRÓJ"
+    },
+    {
+        "code": "GL1R",
+        "description": "GL1R - RACIBÓRZ"
+    },
+    {
+        "code": "GL1S",
+        "description": "GL1S - RUDA ŚLĄSKA"
+    },
+    {
+        "code": "GL1T",
+        "description": "GL1T - TARNOWSKIE GÓRY"
+    },
+    {
+        "code": "GL1W",
+        "description": "GL1W - WODZISŁAW ŚLĄSKI"
+    },
+    {
+        "code": "GL1X",
+        "description": "GL1X - ŻORY"
+    },
+    {
+        "code": "GL1Y",
+        "description": "GL1Y - RYBNIK"
+    },
+    {
+        "code": "GL1Z",
+        "description": "GL1Z - ZABRZE"
+    },
+    {
+        "code": "GW1G",
+        "description": "GW1G - GORZÓW WIELKOPOLSKI"
+    },
+    {
+        "code": "GW1K",
+        "description": "GW1K - STRZELCE KRAJEŃSKIE"
+    },
+    {
+        "code": "GW1M",
+        "description": "GW1M - MIĘDZYRZECZ"
+    },
+    {
+        "code": "GW1S",
+        "description": "GW1S - SŁUBICE"
+    },
+    {
+        "code": "GW1U",
+        "description": "GW1U - SULĘCIN"
+    },
+    {
+        "code": "JG1B",
+        "description": "JG1B - BOLESŁAWIEC"
+    },
+    {
+        "code": "JG1J",
+        "description": "JG1J - JELENIA GÓRA"
+    },
+    {
+        "code": "JG1K",
+        "description": "JG1K - KAMIENNA GÓRA"
+    },
+    {
+        "code": "JG1L",
+        "description": "JG1L - LUBAŃ"
+    },
+    {
+        "code": "JG1S",
+        "description": "JG1S - LWÓWEK ŚLĄSKI"
+    },
+    {
+        "code": "JG1Z",
+        "description": "JG1Z - ZGORZELEC"
+    },
+    {
+        "code": "KA1B",
+        "description": "KA1B - BĘDZIN"
+    },
+    {
+        "code": "KA1C",
+        "description": "KA1C - CHORZÓW"
+    },
+    {
+        "code": "KA1D",
+        "description": "KA1D - DĄBROWA GÓRNICZA"
+    },
+    {
+        "code": "KA1I",
+        "description": "KA1I - SIEMIANOWICE ŚLĄSKIE"
+    },
+    {
+        "code": "KA1J",
+        "description": "KA1J - JAWORZNO"
+    },
+    {
+        "code": "KA1K",
+        "description": "KA1K - KATOWICE"
+    },
+    {
+        "code": "KA1L",
+        "description": "KA1L - MYSŁOWICE"
+    },
+    {
+        "code": "KA1M",
+        "description": "KA1M - MIKOŁÓW"
+    },
+    {
+        "code": "KA1P",
+        "description": "KA1P - PSZCZYNA"
+    },
+    {
+        "code": "KA1S",
+        "description": "KA1S - SOSNOWIEC"
+    },
+    {
+        "code": "KA1T",
+        "description": "KA1T - TYCHY"
+    },
+    {
+        "code": "KA1Y",
+        "description": "KA1Y - BYTOM"
+    },
+    {
+        "code": "KI1A",
+        "description": "KI1A - STASZÓW"
+    },
+    {
+        "code": "KI1B",
+        "description": "KI1B - BUSKO ZDRÓJ"
+    },
+    {
+        "code": "KI1H",
+        "description": "KI1H - STARACHOWICE"
+    },
+    {
+        "code": "KI1I",
+        "description": "KI1I - KAZIMIERZA WIELKA"
+    },
+    {
+        "code": "KI1J",
+        "description": "KI1J - JĘDRZEJÓW"
+    },
+    {
+        "code": "KI1K",
+        "description": "KI1K - KOŃSKIE"
+    },
+    {
+        "code": "KI1L",
+        "description": "KI1L - KIELCE"
+    },
+    {
+        "code": "KI1O",
+        "description": "KI1O - OSTROWIEC ŚWIĘTOKRZYSKI"
+    },
+    {
+        "code": "KI1P",
+        "description": "KI1P - PIŃCZÓW"
+    },
+    {
+        "code": "KI1R",
+        "description": "KI1R - SKARŻYSKO-KAMIENNA"
+    },
+    {
+        "code": "KI1S",
+        "description": "KI1S - SANDOMIERZ"
+    },
+    {
+        "code": "KI1T",
+        "description": "KI1T - OPATÓW"
+    },
+    {
+        "code": "KI1W",
+        "description": "KI1W - WŁOSZCZOWA"
+    },
+    {
+        "code": "KN1K",
+        "description": "KN1K - KOŁO"
+    },
+    {
+        "code": "KN1N",
+        "description": "KN1N - KONIN"
+    },
+    {
+        "code": "KN1S",
+        "description": "KN1S - SŁUPCA"
+    },
+    {
+        "code": "KN1T",
+        "description": "KN1T - TUREK"
+    },
+    {
+        "code": "KO1B",
+        "description": "KO1B - BIAŁOGARD"
+    },
+    {
+        "code": "KO1D",
+        "description": "KO1D - DRAWSKO POMORSKIE"
+    },
+    {
+        "code": "KO1E",
+        "description": "KO1E - SŁAWNO"
+    },
+    {
+        "code": "KO1I",
+        "description": "KO1I - SZCZECINEK"
+    },
+    {
+        "code": "KO1K",
+        "description": "KO1K - KOSZALIN"
+    },
+    {
+        "code": "KO1L",
+        "description": "KO1L - KOŁOBRZEG"
+    },
+    {
+        "code": "KO1W",
+        "description": "KO1W - WAŁCZ"
+    },
+    {
+        "code": "KO2B",
+        "description": "KO2B - ŚWIDWIN"
+    },
+    {
+        "code": "KR1B",
+        "description": "KR1B - SUCHA BESKIDZKA"
+    },
+    {
+        "code": "KR1C",
+        "description": "KR1C - CHRZANÓW"
+    },
+    {
+        "code": "KR1E",
+        "description": "KR1E - OŚWIĘCIM"
+    },
+    {
+        "code": "KR1H",
+        "description": "KR1H - PROSZOWICE"
+    },
+    {
+        "code": "KR1I",
+        "description": "KR1I - WIELICZKA"
+    },
+    {
+        "code": "KR1K",
+        "description": "KR1K - CZERNICHÓW"
+    },
+    {
+        "code": "KR1M",
+        "description": "KR1M - MIECHÓW"
+    },
+    {
+        "code": "KR1O",
+        "description": "KR1O - OLKUSZ"
+    },
+    {
+        "code": "KR1P",
+        "description": "KR1P - KRAKÓW"
+    },
+    {
+        "code": "KR1S",
+        "description": "KR1S - SŁOMNIKI"
+    },
+    {
+        "code": "KR1W",
+        "description": "KR1W - WADOWICE"
+    },
+    {
+        "code": "KR1Y",
+        "description": "KR1Y - MYŚLENICE"
+    },
+    {
+        "code": "KR2E",
+        "description": "KR2E - KĘTY"
+    },
+    {
+        "code": "KR2I",
+        "description": "KR2I - NIEPOŁOMICE"
+    },
+    {
+        "code": "KR2K",
+        "description": "KR2K - KRZESZOWICE"
+    },
+    {
+        "code": "KR2P",
+        "description": "KR2P - SKAŁA"
+    },
+    {
+        "code": "KR2Y",
+        "description": "KR2Y - DOBCZYCE"
+    },
+    {
+        "code": "KR3I",
+        "description": "KR3I - SKAWINA"
+    },
+    {
+        "code": "KS1B",
+        "description": "KS1B - BRZOZÓW"
+    },
+    {
+        "code": "KS1E",
+        "description": "KS1E - LESKO"
+    },
+    {
+        "code": "KS1J",
+        "description": "KS1J - JASŁO"
+    },
+    {
+        "code": "KS1K",
+        "description": "KS1K - KROSNO"
+    },
+    {
+        "code": "KS1S",
+        "description": "KS1S - SANOK"
+    },
+    {
+        "code": "KS2E",
+        "description": "KS2E - USTRZYKI DOLNE"
+    },
+    {
+        "code": "KZ1A",
+        "description": "KZ1A - KALISZ"
+    },
+    {
+        "code": "KZ1E",
+        "description": "KZ1E - KĘPNO"
+    },
+    {
+        "code": "KZ1J",
+        "description": "KZ1J - JAROCIN"
+    },
+    {
+        "code": "KZ1O",
+        "description": "KZ1O - OSTRZESZÓW"
+    },
+    {
+        "code": "KZ1P",
+        "description": "KZ1P - PLESZEW"
+    },
+    {
+        "code": "KZ1R",
+        "description": "KZ1R - KROTOSZYN"
+    },
+    {
+        "code": "KZ1W",
+        "description": "KZ1W - OSTRÓW WIELKOPOLSKI"
+    },
+    {
+        "code": "LD1B",
+        "description": "LD1B - BRZEZINY"
+    },
+    {
+        "code": "LD1G",
+        "description": "LD1G - ZGIERZ"
+    },
+    {
+        "code": "LD1H",
+        "description": "LD1H - SKIERNIEWICE"
+    },
+    {
+        "code": "LD1K",
+        "description": "LD1K - KUTNO"
+    },
+    {
+        "code": "LD1M",
+        "description": "LD1M - ŁÓDŹ"
+    },
+    {
+        "code": "LD1O",
+        "description": "LD1O - ŁOWICZ"
+    },
+    {
+        "code": "LD1P",
+        "description": "LD1P - PABIANICE"
+    },
+    {
+        "code": "LD1R",
+        "description": "LD1R - RAWA MAZOWIECKA"
+    },
+    {
+        "code": "LD1Y",
+        "description": "LD1Y - ŁĘCZYCA"
+    },
+    {
+        "code": "LE1G",
+        "description": "LE1G - GŁOGÓW"
+    },
+    {
+        "code": "LE1J",
+        "description": "LE1J - JAWOR"
+    },
+    {
+        "code": "LE1L",
+        "description": "LE1L - LEGNICA"
+    },
+    {
+        "code": "LE1U",
+        "description": "LE1U - LUBIN"
+    },
+    {
+        "code": "LE1Z",
+        "description": "LE1Z - ZŁOTORYJA"
+    },
+    {
+        "code": "LM1G",
+        "description": "LM1G - GRAJEWO"
+    },
+    {
+        "code": "LM1L",
+        "description": "LM1L - ŁOMŻA"
+    },
+    {
+        "code": "LM1W",
+        "description": "LM1W - WYSOKIE MAZOWIECKIE"
+    },
+    {
+        "code": "LM1Z",
+        "description": "LM1Z - ZAMBRÓW"
+    },
+    {
+        "code": "LU1A",
+        "description": "LU1A - LUBARTÓW"
+    },
+    {
+        "code": "LU1B",
+        "description": "LU1B - BIAŁA PODLASKA"
+    },
+    {
+        "code": "LU1C",
+        "description": "LU1C - CHEŁM"
+    },
+    {
+        "code": "LU1I",
+        "description": "LU1I - LUBLIN"
+    },
+    {
+        "code": "LU1K",
+        "description": "LU1K - KRAŚNIK"
+    },
+    {
+        "code": "LU1O",
+        "description": "LU1O - OPOLE LUBELSKIE"
+    },
+    {
+        "code": "LU1P",
+        "description": "LU1P - PUŁAWY"
+    },
+    {
+        "code": "LU1R",
+        "description": "LU1R - RADZYŃ PODLASKI"
+    },
+    {
+        "code": "LU1S",
+        "description": "LU1S - ŚWIDNIK"
+    },
+    {
+        "code": "LU1U",
+        "description": "LU1U - ŁUKÓW"
+    },
+    {
+        "code": "LU1W",
+        "description": "LU1W - WŁODAWA"
+    },
+    {
+        "code": "LU1Y",
+        "description": "LU1Y - RYKI"
+    },
+    {
+        "code": "NS1G",
+        "description": "NS1G - GORLICE"
+    },
+    {
+        "code": "NS1L",
+        "description": "NS1L - LIMANOWA"
+    },
+    {
+        "code": "NS1M",
+        "description": "NS1M - MUSZYNA"
+    },
+    {
+        "code": "NS1S",
+        "description": "NS1S - NOWY SĄCZ"
+    },
+    {
+        "code": "NS1T",
+        "description": "NS1T - NOWY TARG"
+    },
+    {
+        "code": "NS1Z",
+        "description": "NS1Z - ZAKOPANE"
+    },
+    {
+        "code": "NS2L",
+        "description": "NS2L - MSZANA DOLNA"
+    },
+    {
+        "code": "OL1B",
+        "description": "OL1B - BISKUPIEC"
+    },
+    {
+        "code": "OL1C",
+        "description": "OL1C - OLECKO"
+    },
+    {
+        "code": "OL1E",
+        "description": "OL1E - EŁK"
+    },
+    {
+        "code": "OL1G",
+        "description": "OL1G - GIŻYCKO"
+    },
+    {
+        "code": "OL1K",
+        "description": "OL1K - KĘTRZYN"
+    },
+    {
+        "code": "OL1L",
+        "description": "OL1L - LIDZBARK WARMIŃSKI"
+    },
+    {
+        "code": "OL1M",
+        "description": "OL1M - MRĄGOWO"
+    },
+    {
+        "code": "OL1N",
+        "description": "OL1N - NIDZICA"
+    },
+    {
+        "code": "OL1O",
+        "description": "OL1O - OLSZTYN"
+    },
+    {
+        "code": "OL1P",
+        "description": "OL1P - PISZ"
+    },
+    {
+        "code": "OL1S",
+        "description": "OL1S - SZCZYTNO"
+    },
+    {
+        "code": "OL1Y",
+        "description": "OL1Y - BARTOSZYCE"
+    },
+    {
+        "code": "OL2G",
+        "description": "OL2G - WĘGORZEWO"
+    },
+    {
+        "code": "OP1B",
+        "description": "OP1B - BRZEG"
+    },
+    {
+        "code": "OP1G",
+        "description": "OP1G - GŁUBCZYCE"
+    },
+    {
+        "code": "OP1K",
+        "description": "OP1K - KĘDZIERZYN-KOŹLE"
+    },
+    {
+        "code": "OP1L",
+        "description": "OP1L - OLESNO"
+    },
+    {
+        "code": "OP1N",
+        "description": "OP1N - NYSA"
+    },
+    {
+        "code": "OP1O",
+        "description": "OP1O - OPOLE"
+    },
+    {
+        "code": "OP1P",
+        "description": "OP1P - PRUDNIK"
+    },
+    {
+        "code": "OP1S",
+        "description": "OP1S - STRZELCE OPOLSKIE"
+    },
+    {
+        "code": "OP1U",
+        "description": "OP1U - KLUCZBORK"
+    },
+    {
+        "code": "OS1M",
+        "description": "OS1M - OSTRÓW MAZOWIECKA"
+    },
+    {
+        "code": "OS1O",
+        "description": "OS1O - OSTROŁĘKA"
+    },
+    {
+        "code": "OS1P",
+        "description": "OS1P - PRZASNYSZ"
+    },
+    {
+        "code": "OS1U",
+        "description": "OS1U - PUŁTUSK"
+    },
+    {
+        "code": "OS1W",
+        "description": "OS1W - WYSZKÓW"
+    },
+    {
+        "code": "PL1C",
+        "description": "PL1C - CIECHANÓW"
+    },
+    {
+        "code": "PL1E",
+        "description": "PL1E - SIERPC"
+    },
+    {
+        "code": "PL1G",
+        "description": "PL1G - GOSTYNIN"
+    },
+    {
+        "code": "PL1L",
+        "description": "PL1L - PŁOŃSK"
+    },
+    {
+        "code": "PL1M",
+        "description": "PL1M - MŁAWA"
+    },
+    {
+        "code": "PL1O",
+        "description": "PL1O - SOCHACZEW"
+    },
+    {
+        "code": "PL1P",
+        "description": "PL1P - PŁOCK"
+    },
+    {
+        "code": "PL1Z",
+        "description": "PL1Z - ŻYRARDÓW"
+    },
+    {
+        "code": "PL2M",
+        "description": "PL2M - ŻUROMIN"
+    },
+    {
+        "code": "PO1A",
+        "description": "PO1A - SZAMOTUŁY"
+    },
+    {
+        "code": "PO1B",
+        "description": "PO1B - WĄGROWIEC"
+    },
+    {
+        "code": "PO1D",
+        "description": "PO1D - ŚRODA WLKP."
+    },
+    {
+        "code": "PO1E",
+        "description": "PO1E - WOLSZTYN"
+    },
+    {
+        "code": "PO1F",
+        "description": "PO1F - WRZEŚNIA"
+    },
+    {
+        "code": "PO1G",
+        "description": "PO1G - GNIEZNO"
+    },
+    {
+        "code": "PO1H",
+        "description": "PO1H - CHODZIEŻ"
+    },
+    {
+        "code": "PO1I",
+        "description": "PO1I - PIŁA"
+    },
+    {
+        "code": "PO1K",
+        "description": "PO1K - KOŚCIAN"
+    },
+    {
+        "code": "PO1L",
+        "description": "PO1L - LESZNO"
+    },
+    {
+        "code": "PO1M",
+        "description": "PO1M - ŚREM"
+    },
+    {
+        "code": "PO1N",
+        "description": "PO1N - NOWY TOMYŚL"
+    },
+    {
+        "code": "PO1O",
+        "description": "PO1O - OBORNIKI"
+    },
+    {
+        "code": "PO1P",
+        "description": "PO1P - POZNAŃ (V)"
+    },
+    {
+        "code": "PO1R",
+        "description": "PO1R - RAWICZ"
+    },
+    {
+        "code": "PO1S",
+        "description": "PO1S - GRODZISK WLKP."
+    },
+    {
+        "code": "PO1T",
+        "description": "PO1T - TRZCIANKA"
+    },
+    {
+        "code": "PO1Y",
+        "description": "PO1Y - GOSTYŃ"
+    },
+    {
+        "code": "PO1Z",
+        "description": "PO1Z - ZŁOTÓW"
+    },
+    {
+        "code": "PO2A",
+        "description": "PO2A - MIĘDZYCHÓD"
+    },
+    {
+        "code": "PO2H",
+        "description": "PO2H - WYRZYSK"
+    },
+    {
+        "code": "PO2P",
+        "description": "PO2P - POZNAŃ (VI)"
+    },
+    {
+        "code": "PO2T",
+        "description": "PO2T - CZARNKÓW"
+    },
+    {
+        "code": "PR1J",
+        "description": "PR1J - JAROSŁAW"
+    },
+    {
+        "code": "PR1L",
+        "description": "PR1L - LUBACZÓW"
+    },
+    {
+        "code": "PR1P",
+        "description": "PR1P - PRZEMYŚL"
+    },
+    {
+        "code": "PR1R",
+        "description": "PR1R - PRZEWORSK"
+    },
+    {
+        "code": "PR2R",
+        "description": "PR2R - SIENIAWA"
+    },
+    {
+        "code": "PT1B",
+        "description": "PT1B - BEŁCHATÓW"
+    },
+    {
+        "code": "PT1O",
+        "description": "PT1O - OPOCZNO"
+    },
+    {
+        "code": "PT1P",
+        "description": "PT1P - PIOTRKÓW TRYBUNALSKI"
+    },
+    {
+        "code": "PT1R",
+        "description": "PT1R - RADOMSKO"
+    },
+    {
+        "code": "PT1T",
+        "description": "PT1T - TOMASZÓW MAZOWIECKI"
+    },
+    {
+        "code": "RA1G",
+        "description": "RA1G - GRÓJEC"
+    },
+    {
+        "code": "RA1K",
+        "description": "RA1K - KOZIENICE"
+    },
+    {
+        "code": "RA1L",
+        "description": "RA1L - LIPSKO"
+    },
+    {
+        "code": "RA1P",
+        "description": "RA1P - PRZYSUCHA"
+    },
+    {
+        "code": "RA1R",
+        "description": "RA1R - RADOM"
+    },
+    {
+        "code": "RA1S",
+        "description": "RA1S - SZYDŁOWIEC"
+    },
+    {
+        "code": "RA1Z",
+        "description": "RA1Z - ZWOLEŃ"
+    },
+    {
+        "code": "RA2G",
+        "description": "RA2G - BIAŁOBRZEGI"
+    },
+    {
+        "code": "RA2Z",
+        "description": "RA2Z - PIONKI"
+    },
+    {
+        "code": "RZ1A",
+        "description": "RZ1A - ŁAŃCUT"
+    },
+    {
+        "code": "RZ1D",
+        "description": "RZ1D - DĘBICA"
+    },
+    {
+        "code": "RZ1E",
+        "description": "RZ1E - LEŻAJSK"
+    },
+    {
+        "code": "RZ1R",
+        "description": "RZ1R - ROPCZYCE"
+    },
+    {
+        "code": "RZ1S",
+        "description": "RZ1S - STRZYŻÓW"
+    },
+    {
+        "code": "RZ1Z",
+        "description": "RZ1Z - RZESZÓW"
+    },
+    {
+        "code": "RZ2Z",
+        "description": "RZ2Z - TYCZYN"
+    },
+    {
+        "code": "SI1G",
+        "description": "SI1G - GARWOLIN"
+    },
+    {
+        "code": "SI1M",
+        "description": "SI1M - MIŃSK MAZOWIECKI"
+    },
+    {
+        "code": "SI1P",
+        "description": "SI1P - SOKOŁÓW PODLASKI"
+    },
+    {
+        "code": "SI1S",
+        "description": "SI1S - SIEDLCE"
+    },
+    {
+        "code": "SI1W",
+        "description": "SI1W - WĘGRÓW"
+    },
+    {
+        "code": "SI2S",
+        "description": "SI2S - ŁOSICE"
+    },
+    {
+        "code": "SL1B",
+        "description": "SL1B - BYTÓW"
+    },
+    {
+        "code": "SL1C",
+        "description": "SL1C - CHOJNICE"
+    },
+    {
+        "code": "SL1L",
+        "description": "SL1L - LĘBORK"
+    },
+    {
+        "code": "SL1M",
+        "description": "SL1M - MIASTKO"
+    },
+    {
+        "code": "SL1S",
+        "description": "SL1S - SŁUPSK"
+    },
+    {
+        "code": "SL1Z",
+        "description": "SL1Z - CZŁUCHÓW"
+    },
+    {
+        "code": "SO1C",
+        "description": "SO1C - CZELADŹ"
+    },
+    {
+        "code": "SR1L",
+        "description": "SR1L - ŁASK"
+    },
+    {
+        "code": "SR1S",
+        "description": "SR1S - SIERADZ"
+    },
+    {
+        "code": "SR1W",
+        "description": "SR1W - WIELUŃ"
+    },
+    {
+        "code": "SR1Z",
+        "description": "SR1Z - ZDUŃSKA WOLA"
+    },
+    {
+        "code": "SR2L",
+        "description": "SR2L - PODDĘBICE"
+    },
+    {
+        "code": "SR2W",
+        "description": "SR2W - PAJĘCZNO"
+    },
+    {
+        "code": "SU1A",
+        "description": "SU1A - AUGUSTÓW"
+    },
+    {
+        "code": "SU1N",
+        "description": "SU1N - SEJNY"
+    },
+    {
+        "code": "SU1S",
+        "description": "SU1S - SUWAŁKI"
+    },
+    {
+        "code": "SW1D",
+        "description": "SW1D - DZIERŻONIÓW"
+    },
+    {
+        "code": "SW1K",
+        "description": "SW1K - KŁODZKO"
+    },
+    {
+        "code": "SW1S",
+        "description": "SW1S - ŚWIDNICA"
+    },
+    {
+        "code": "SW1W",
+        "description": "SW1W - WAŁBRZYCH"
+    },
+    {
+        "code": "SW1Z",
+        "description": "SW1Z - ZĄBKOWICE ŚLĄSKIE"
+    },
+    {
+        "code": "SW2K",
+        "description": "SW2K - NOWA RUDA"
+    },
+    {
+        "code": "SZ1C",
+        "description": "SZ1C - CHOSZCZNO"
+    },
+    {
+        "code": "SZ1G",
+        "description": "SZ1G - GRYFICE"
+    },
+    {
+        "code": "SZ1K",
+        "description": "SZ1K - KAMIEŃ POMORSKI"
+    },
+    {
+        "code": "SZ1L",
+        "description": "SZ1L - ŁOBEZ"
+    },
+    {
+        "code": "SZ1M",
+        "description": "SZ1M - MYŚLIBÓRZ"
+    },
+    {
+        "code": "SZ1O",
+        "description": "SZ1O - GOLENIÓW"
+    },
+    {
+        "code": "SZ1S",
+        "description": "SZ1S - SZCZECIN"
+    },
+    {
+        "code": "SZ1T",
+        "description": "SZ1T - STARGARD"
+    },
+    {
+        "code": "SZ1W",
+        "description": "SZ1W - ŚWINOUJŚCIE"
+    },
+    {
+        "code": "SZ1Y",
+        "description": "SZ1Y - GRYFINO"
+    },
+    {
+        "code": "SZ2S",
+        "description": "SZ2S - POLICE"
+    },
+    {
+        "code": "SZ2T",
+        "description": "SZ2T - PYRZYCE"
+    },
+    {
+        "code": "TB1K",
+        "description": "TB1K - KOLBUSZOWA"
+    },
+    {
+        "code": "TB1M",
+        "description": "TB1M - MIELEC"
+    },
+    {
+        "code": "TB1N",
+        "description": "TB1N - NISKO"
+    },
+    {
+        "code": "TB1S",
+        "description": "TB1S - STALOWA WOLA"
+    },
+    {
+        "code": "TB1T",
+        "description": "TB1T - TARNOBRZEG"
+    },
+    {
+        "code": "TO1B",
+        "description": "TO1B - BRODNICA"
+    },
+    {
+        "code": "TO1C",
+        "description": "TO1C - CHEŁMNO"
+    },
+    {
+        "code": "TO1G",
+        "description": "TO1G - GOLUB-DOBRZYŃ"
+    },
+    {
+        "code": "TO1T",
+        "description": "TO1T - TORUŃ"
+    },
+    {
+        "code": "TO1U",
+        "description": "TO1U - GRUDZIĄDZ"
+    },
+    {
+        "code": "TO1W",
+        "description": "TO1W - WĄBRZEŹNO"
+    },
+    {
+        "code": "TR1B",
+        "description": "TR1B - BRZESKO"
+    },
+    {
+        "code": "TR1D",
+        "description": "TR1D - DĄBROWA TARNOWSKA"
+    },
+    {
+        "code": "TR1O",
+        "description": "TR1O - BOCHNIA"
+    },
+    {
+        "code": "TR1T",
+        "description": "TR1T - TARNÓW"
+    },
+    {
+        "code": "TR2T",
+        "description": "TR2T - TUCHÓW"
+    },
+    {
+        "code": "WA1G",
+        "description": "WA1G - GRODZISK MAZOWIECKI"
+    },
+    {
+        "code": "WA1I",
+        "description": "WA1I - PIASECZNO"
+    },
+    {
+        "code": "WA1L",
+        "description": "WA1L - LEGIONOWO"
+    },
+    {
+        "code": "WA1M",
+        "description": "WA1M - WARSZAWA (VI)"
+    },
+    {
+        "code": "WA1N",
+        "description": "WA1N - NOWY DWÓR MAZOWIECKI"
+    },
+    {
+        "code": "WA1O",
+        "description": "WA1O - OTWOCK"
+    },
+    {
+        "code": "WA1P",
+        "description": "WA1P - PRUSZKÓW"
+    },
+    {
+        "code": "WA1W",
+        "description": "WA1W - WOŁOMIN"
+    },
+    {
+        "code": "WA2M",
+        "description": "WA2M - WARSZAWA (VII)"
+    },
+    {
+        "code": "WA3M",
+        "description": "WA3M - WARSZAWA (IX)"
+    },
+    {
+        "code": "WA4M",
+        "description": "WA4M - WARSZAWA (X)"
+    },
+    {
+        "code": "WA5M",
+        "description": "WA5M - WARSZAWA (XIII)"
+    },
+    {
+        "code": "WA6M",
+        "description": "WA6M - WARSZAWA (XV)"
+    },
+    {
+        "code": "WL1A",
+        "description": "WL1A - ALEKSANDRÓW KUJAWSKI"
+    },
+    {
+        "code": "WL1L",
+        "description": "WL1L - LIPNO"
+    },
+    {
+        "code": "WL1R",
+        "description": "WL1R - RADZIEJÓW"
+    },
+    {
+        "code": "WL1W",
+        "description": "WL1W - WŁOCŁAWEK"
+    },
+    {
+        "code": "WL1Y",
+        "description": "WL1Y - RYPIN"
+    },
+    {
+        "code": "WR1E",
+        "description": "WR1E - OLEŚNICA"
+    },
+    {
+        "code": "WR1K",
+        "description": "WR1K - WROCŁAW"
+    },
+    {
+        "code": "WR1L",
+        "description": "WR1L - WOŁÓW"
+    },
+    {
+        "code": "WR1M",
+        "description": "WR1M - MILICZ"
+    },
+    {
+        "code": "WR1O",
+        "description": "WR1O - OŁAWA"
+    },
+    {
+        "code": "WR1S",
+        "description": "WR1S - ŚRODA ŚLĄSKA"
+    },
+    {
+        "code": "WR1T",
+        "description": "WR1T - STRZELIN"
+    },
+    {
+        "code": "WR1W",
+        "description": "WR1W - TRZEBNICA"
+    },
+    {
+        "code": "ZA1B",
+        "description": "ZA1B - BIŁGORAJ"
+    },
+    {
+        "code": "ZA1H",
+        "description": "ZA1H - HRUBIESZÓW"
+    },
+    {
+        "code": "ZA1J",
+        "description": "ZA1J - JANÓW LUBELSKI"
+    },
+    {
+        "code": "ZA1K",
+        "description": "ZA1K - KRASNYSTAW"
+    },
+    {
+        "code": "ZA1T",
+        "description": "ZA1T - TOMASZÓW LUBELSKI"
+    },
+    {
+        "code": "ZA1Z",
+        "description": "ZA1Z - ZAMOŚĆ"
+    },
+    {
+        "code": "ZG1E",
+        "description": "ZG1E - ZIELONA GÓRA"
+    },
+    {
+        "code": "ZG1G",
+        "description": "ZG1G - ŻAGAŃ"
+    },
+    {
+        "code": "ZG1K",
+        "description": "ZG1K - KROSNO ODRZAŃSKIE"
+    },
+    {
+        "code": "ZG1N",
+        "description": "ZG1N - NOWA SÓL"
+    },
+    {
+        "code": "ZG1R",
+        "description": "ZG1R - ŻARY"
+    },
+    {
+        "code": "ZG1S",
+        "description": "ZG1S - ŚWIEBODZIN"
+    },
+    {
+        "code": "ZG1W",
+        "description": "ZG1W - WSCHOWA"
+    },
+    {
+        "code": "ZG2K",
+        "description": "ZG2K - GUBIN"
+    },
+    {
+        "code": "ZG2S",
+        "description": "ZG2S - SULECHÓW"
+    }
+]

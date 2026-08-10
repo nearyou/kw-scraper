@@ -1,0 +1,478 @@
+<!DOCTYPE HTML>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ ksiega }}</title>
+  {% include 'head.html' %}
+  <style>
+    header {
+      background-color: #162635;
+      color: #cccccc;
+      padding: 20px;
+    }
+    main {
+      padding: 20px;
+    }
+    footer {
+      font-size: 18px;
+      background-color: #162635;
+      color: #cccccc;
+      position: fixed;
+    }
+    .btn-group {
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-bottom: 10px;
+      margin-right: 10px;
+    }
+    .btn-group .btn {
+      margin-bottom: 10px;
+      margin-right: 10px;
+    }
+    /* Rozstawienie tabeli */
+    .table thead th {
+      width: calc(100% / 3);
+    }
+  </style>
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js" integrity="sha256-/JqT3SQfawRcv/BIHPThkBvs0OEvtFFmqPF/lYI/Cxo=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+  <link rel="stylesheet" href="/static/admin.css">
+</head>
+<body id="display">
+    {% include 'nav.html' %}
+    <div class="card mt-3 m-3">
+      <ol class="breadcrumb my-2 px-3 py-2">
+        <li class="breadcrumb-item">Przeglądasz</li>
+        <li class="breadcrumb-item active">{{ ksiega }}</li>
+      </ol>
+    </div>
+    <div class="container">
+      <div class="card p-4 m-2">
+        <div class="text-center mb-4">
+          <h2 class="fw-bold">{{ get_miasto(data.ulica) }}</h2>
+          <div class="table-responsive">
+            <table class="table table-striped">
+              <thead>
+                <tr>
+                  <th>Nr księgi wieczystej</th>
+                  <th>Identyfikator działki</th>
+                  <th>Adres</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>{{ data.ksiega }}</td>
+                  <td>
+                    {% if data.identyfikator != "Brak" %}
+                    <a href="http://mapy.geoportal.gov.pl/imap/?identifyParcel={{ data.identyfikator }}" target="_blank">{{ data.identyfikator }}</a>
+                    <br>
+                    <img src="/static/logo-geoportal.svg" width="100" height="20" alt="Logo Geoportal">
+                    {% else %}
+                    Brak
+                    {% endif %}
+                  </td>
+                  <td>
+                    {% if data.adres != "Brak" %}
+                    {{ data.adres }}
+                    {% elif data.ulica != "Brak" %}
+                    {{ data.ulica }}
+                    {% else %}
+                     Brak
+                    {% endif %}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-striped">
+              <thead>
+                <tr>
+                  <th>Obręb ewidencyjny</th>
+                  <th>Obszar całej nieruchomości</th>
+                  <th>Typ księgi wieczystej</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>{{ data.obreb_ewidencyjny }}</td>
+                  <td>{{ data.obszar_calej }}</td>
+                  <td>{{ data.typ }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-striped">
+              <thead>
+                <tr>
+                  <th>Obciążenie hipoteki</th>
+                  <th>Położenie</th>
+                  <th>Ilość właścicieli</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>{{ data.kwota_hipoteki }}</td>
+                  <td>{{ data.polozenie }}</td>
+                  <td>
+                    {{ lista_wlascicieli|length if lista_wlascicieli else 0 }}
+                    {% if lista_wlascicieli_raw is defined and lista_wlascicieli_raw|length != (lista_wlascicieli|length if lista_wlascicieli else 0) %}
+                      <small class="text-muted">(raw: {{ lista_wlascicieli_raw|length }})</small>
+                    {% endif %}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <!-- Funkcje wewnątrz księgi wieczystej -->
+        <div class="styled-buttons">
+          <button type="button" data-bs-target="#noteModal" data-bs-toggle="modal" id="noteBtn" class="btn btn-primary">Notatka</button>
+          <button type="button" id="refreshBookBtn" class="ms-2 btn btn-success">Odśwież księgę</button>
+          <select id="selectStatus" class="ms-2 btn">
+            <option value="loading" selected></option>
+            <option value="w_pozysku">W pozysku</option>
+            <option value="otwarte">Otwarte</option>
+            <option value="analiza">Analiza</option>
+            <option value="odrzucone">Odrzucone</option>
+            <option value="pozyskane">Pozyskane</option>
+          </select> 
+        </div>
+        <div class="card-body d-flex justify-content-end">
+          <div class="form-check form-switch me-3">
+            <input class="form-check-input" type="checkbox" id="dedupeSwitch" {% if dedupe %}checked{% endif %}>
+            <label class="form-check-label" for="dedupeSwitch">Ukryj duplikaty właścicieli</label>
+          </div>
+          {% if lista_wlascicieli_raw is defined %}
+          <a href="?ksiega={{ ksiega }}&dedupe=0" class="btn btn-sm btn-outline-secondary">Pokaż surowe</a>
+          {% endif %}
+        </div>
+      </div>
+      
+      <div class="card p-4 m-2 mt-4">
+        <h2 class="mb-2">Właściciele</h2>
+        {% if lista_wlascicieli %}
+          {% set individual_owners = lista_wlascicieli|selectattr('czy_firma', 'in', [false, none])|list %}
+          {% set company_owners = lista_wlascicieli|selectattr('czy_firma', 'equalto', true)|list %}
+          
+          {% if individual_owners %}
+          <h4 class="mb-3">Osoby fizyczne ({{ individual_owners|length }})</h4>
+          <div class="table-responsive mb-4">
+            <table class="table table-bordered table-striped table-hover">
+              <thead class="thead-dark">
+                <tr>
+                  <th style="width:25%;" class="text-center">Imię</th>
+                  <th style="width:25%;" class="text-center">Nazwisko</th>
+                  <th style="width:20%;" class="text-center">Udział</th>
+                  <th style="width:20%;" class="text-center">PESEL</th>
+                  <th style="width:10%;" class="text-center">Wiek</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for osoba in individual_owners %}
+                <tr>
+                  <td class="text-center">{{ osoba.imie }}</td>
+                  <td class="text-center">{{ osoba.nazwisko }}</td>
+                  <td class="text-center">{{ osoba.udzial }}</td>
+                  <td class="text-center">{{ osoba.pesel }}</td>
+                  <td class="text-left">{{ osoba.wiek }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% endif %}
+          
+          {% if company_owners %}
+          <h4 class="mb-3">Firmy i organizacje ({{ company_owners|length }})</h4>
+          <div class="table-responsive">
+            <table class="table table-bordered table-striped table-hover">
+              <thead class="thead-dark">
+                <tr>
+                  <th style="width:70%;" class="text-center">Nazwa</th>
+                  <th style="width:30%;" class="text-center">Udział</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for firma in company_owners %}
+                <tr>
+                  <td class="text-center"><strong>{{ firma.nazwa }}</strong></td>
+                  <td class="text-center">{{ firma.udzial }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% endif %}
+          
+          <!-- Fallback: show all owners if filtering fails -->
+          {% if not individual_owners and not company_owners %}
+          <h4 class="mb-3">Wszyscy właściciele</h4>
+          <div class="table-responsive">
+            <table class="table table-bordered table-striped table-hover">
+              <thead class="thead-dark">
+                <tr>
+                  <th class="text-center">Imię</th>
+                  <th class="text-center">Nazwisko</th>
+                  <th class="text-center">Nazwa</th>
+                  <th class="text-center">Udział</th>
+                  <th class="text-center">PESEL</th>
+                  <th class="text-center">Wiek</th>
+                  <th class="text-center">Czy firma</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for wlasciciel in lista_wlascicieli %}
+                <tr>
+                  <td class="text-center">{{ wlasciciel.imie }}</td>
+                  <td class="text-center">{{ wlasciciel.nazwisko }}</td>
+                  <td class="text-center">{{ wlasciciel.nazwa }}</td>
+                  <td class="text-center">{{ wlasciciel.udzial }}</td>
+                  <td class="text-center">{{ wlasciciel.pesel }}</td>
+                  <td class="text-center">{{ wlasciciel.wiek }}</td>
+                  <td class="text-center">{{ wlasciciel.czy_firma }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% endif %}
+        {% else %}
+        <p class="text-center"><i>Brak właścicieli</i></p>
+        {% endif %}
+      </div>
+      
+      <div class="card p-4 m-2 mt-4 text-center">
+        <h2>Podgląd księgi wieczystej 
+          <button type="button" class="ms-2 btn toggler mt-2 mt-md-0" data-bs-toggle="collapse" data-bs-target="#iframe-container" id="expandBookBtn">Rozwiń</button>
+        </h2>
+        <br>
+        <div class="collapse" id="iframe-container">
+          <div class="mt-2 btn-group" role="group" id="btnGroup">
+            <button class="btn btn-outline-dark active" id="dio">Dział 1-O</button>
+            <button class="btn btn-outline-dark" id="dis">Dział 1-SP</button>
+            <button class="btn btn-outline-dark" id="dii">Dział II</button>
+            <button class="btn btn-outline-dark" id="diii">Dział III</button>
+            <button class="btn btn-outline-dark" id="div">Dział IV</button>
+          </div>
+          <iframe id="kwframe" style="border: 1px solid black;" src="about:blank" frameborder="1" scrolling="yes" width="100%" height="900px"></iframe>
+        </div>
+        <script>
+          $(document).ready(function () {
+            // Expose these to window so other scripts (like the refresh action) can reuse them
+            window.kwSections = null;
+            let ksiega = "{{ ksiega }}";
+
+            window.showSection = function(section) {
+              if (!window.kwSections) return;
+              let html = window.kwSections[section];
+              let iframe = document.getElementById("kwframe");
+              if (html) {
+                iframe.contentWindow.document.open();
+                iframe.contentWindow.document.write(html);
+                iframe.contentWindow.document.close();
+              } else {
+                iframe.contentWindow.document.open();
+                iframe.contentWindow.document.write("<div class='p-4 text-danger'>Brak danych dla tej sekcji.</div>");
+                iframe.contentWindow.document.close();
+              }
+            }
+
+            $("#expandBookBtn").on("click", function() {
+              if (!kwSections) {
+                $.getJSON("/api/kw_s3/" + ksiega, function(data) {
+                  kwSections = data;
+                  showSection("DIO");
+                }).fail(function(xhr) {
+                  let iframe = document.getElementById("kwframe");
+                  iframe.contentWindow.document.open();
+                  iframe.contentWindow.document.write("<div class='p-4 text-danger'>Błąd ładowania danych z S3.</div>");
+                  iframe.contentWindow.document.close();
+                });
+              } else {
+                showSection("DIO");
+              }
+            });
+
+            $("#btnGroup button").click(function () {
+              $("#btnGroup button").removeClass("active");
+              $(this).addClass("active");
+              let btnId = $(this).attr("id").toUpperCase();
+              window.showSection(btnId);
+            });
+          });
+        </script>        
+      </div>
+    </div>
+    <div class="modal fade" id="noteModal" tabindex="-1" role="dialog" aria-hidden="true">
+      <div class="modal-dialog" role="document">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h4 class="modal-title">Notatka</h4>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Zamknij"></button>
+          </div>
+          <div class="modal-body">
+            <textarea class="form-control" id="noteInput" placeholder="Notatka" rows="10"></textarea>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-primary" id="saveNote">Zapisz</button>
+            <button type="button" class="btn btn-danger" data-bs-dismiss="modal">Zamknij</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script>
+      $(document).ready(function() {
+          getStatus();
+
+          // Pobierz notatkę klienta
+          let ksiega = "{{ ksiega }}";
+          let url = "/api/get_note/" + ksiega;
+          $.ajax({
+            url: url,
+            type: "GET",
+            success: function(response) {
+              $("#noteInput").val(response);
+            },
+            error: function(xhr, status, error) {
+              console.error("Wystąpił błąd" + error);
+            }
+          })
+
+          function resetSelectClasses() {
+            $("#selectStatus").removeClass("btn-primary");
+            $("#selectStatus").removeClass("btn-success");
+            $("#selectStatus").removeClass("btn-warning");
+            $("#selectStatus").removeClass("btn-danger");
+            $("#selectStatus").removeClass("btn-info");
+          }
+
+          function setStatus() {
+            let ksiega = "{{ ksiega }}";
+            let status = $("#selectStatus").find(":selected").val();
+            let url = "/api/set_status/" + ksiega;
+            $.ajax({
+              url: url,
+              type: "POST",
+              contentType: "application/json",
+              data: JSON.stringify({ status: status }),
+              success: function(response) {
+                console.log(response);
+              },
+              error: function(xhr, status, error) {
+                console.error("Wystąpił błąd" + error);
+              }
+            })
+          }
+
+          function getStatus() {
+            let ksiega = "{{ ksiega }}";
+            let url = "/api/get_status/" + ksiega;
+            $.ajax({
+              url: url,
+              type: "GET",
+              success: function(response) {
+                $("#selectStatus").val(response);
+                $("#selectStatus").find('option[value="loading"]').remove();
+                updateSelectClasses();
+              },
+              error: function(xhr, status, error) {
+                console.error("Wystąpił błąd" + error);
+              }
+            })
+          }
+
+          function updateSelectClasses() {
+            let selected = $("#selectStatus").find(":selected").val();
+            switch (selected) {
+              case "analiza":
+                $("#selectStatus").addClass("btn-warning");
+                break;
+              case "otwarte":
+                $("#selectStatus").addClass("btn-success");
+                break;
+              case "w_pozysku":
+                $("#selectStatus").addClass("btn-primary");
+                break;
+              case "odrzucone":
+                $("#selectStatus").addClass("btn-danger");
+                break;
+              case "pozyskane":
+                $("#selectStatus").addClass("btn-info");
+                break; 
+            }
+          }
+
+          $("#selectStatus").change(function() {
+            setStatus();
+            resetSelectClasses();
+            updateSelectClasses();
+          });
+          $("#saveNote").click(function() {
+            let userInput = $("#noteInput").val();
+            let ksiega = "{{ ksiega }}";
+            let url = "/api/note/" + ksiega;
+
+            $.ajax({
+              url: url,
+              type: "POST",
+              contentType: "application/json",
+              data: JSON.stringify({ note: userInput, ksiega: ksiega}),
+              success: function(response) {
+                $("#noteModal").modal('hide');
+              },
+              error: function(xhr, status, error) {
+                console.error("Wystąpił błąd" + error);
+              }
+            })
+          });
+          // Refresh księga (single-book scrape outside queue)
+          $("#refreshBookBtn").click(function() {
+            if (!confirm('Uruchomić natychmiastowe odświeżenie tej księgi?')) return;
+            let ksiega = "{{ ksiega }}";
+            let $btn = $(this);
+            $btn.prop('disabled', true).text('Odświeżanie...');
+
+            $.ajax({
+              url: "/api/refresh_book/" + encodeURIComponent(ksiega),
+              type: "POST",
+              success: function(response) {
+                // Try to fetch updated sections from S3 and update iframe immediately
+                $.getJSON('/api/kw_s3/' + encodeURIComponent(ksiega), function(data) {
+                  window.kwSections = data;
+                  if (window.showSection) window.showSection('DIO');
+                  $btn.prop('disabled', false).text('Odśwież księgę');
+                  alert('Księga została odświeżona i podgląd zaktualizowany.');
+                }).fail(function() {
+                  $btn.prop('disabled', false).text('Odśwież księgę');
+                  alert('Scrapowanie zostało uruchomione. Jeśli dane nie pojawią się od razu, spróbuj ponownie za kilka sekund.');
+                });
+              },
+              error: function(xhr) {
+                $btn.prop('disabled', false).text('Odśwież księgę');
+                let msg = xhr.responseText || 'Błąd serwera';
+                alert('Nie udało się uruchomić odświeżenia: ' + msg);
+              }
+            });
+          });
+      });
+    </script>
+    <script>
+      // Handle dedupe switch: reload page with dedupe=1 or dedupe=0
+      document.addEventListener('DOMContentLoaded', function() {
+        var switchEl = document.getElementById('dedupeSwitch');
+        if (!switchEl) return;
+        switchEl.addEventListener('change', function() {
+          var params = new URLSearchParams(window.location.search);
+          params.set('ksiega', '{{ ksiega }}');
+          params.set('dedupe', this.checked ? '1' : '0');
+          window.location.search = params.toString();
+        });
+      });
+    </script>
+</body>
+</html>

@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+    <title>Logowanie</title>
+    {% include 'head.html' %}
+    <style>
+        body {
+            height: 100vh;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-image: url('/static/login-bg.png');
+            backdrop-filter:blur(10px);
+            background-size: cover;
+            background-repeat: no-repeat;   
+        }
+        .card {
+            width: auto;
+            max-width: 400px; 
+            border: none;
+            padding: 20px;
+            border-radius: 10px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <h2 class="text-center mb-1">Zaloguj się</h2>
+    <span class="mb-4 text-center">Przeglądaj księgi wieczyste</span>
+    <form method="POST" action="/">
+        <div class="mb-3">
+            <input type="text" name="login" class="form-control" id="login-input" placeholder="Nazwa użytkownika" required>
+        </div>
+        <div class="mb-3">
+            <input type="password" name="password" class="form-control" id="password-input" placeholder="Hasło" required>
+        </div>
+        <button type="submit" class="btn btn-primary btn-block">Zaloguj</button>
+    </form>
+    {% if error %}
+    <div class="alert alert-danger mt-4" role="alert">
+        {{ error }}
+    </div>
+    {% endif %}
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.11.8/dist/umd/popper.min.js" integrity="sha384-I7E8VVD/ismYTF4hNIPjVp/Zjvgyol6VFvRkX/vR+Vc4jQkC+hVqc2pM8ODewa9r" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.min.js" integrity="sha384-0pUGZvbkm6XF6gxjEnlmuGrJXVbNuzT9qBBavbLwCsOGabYfZo0T0to5eqruptLy" crossorigin="anonymous"></script>
+</body>
+</html>

@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kolejka zadań | KWCrawler</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.3/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="/static/admin.css">
+    {% include 'head.html' %}
+    <style>
+        .progress {
+            height: 25px;
+        }
+        .queue-status {
+            font-size: 1.2em;
+            font-weight: bold;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .status-pending {
+            background-color: #cff4fc;
+            color: #055160;
+        }
+        .status-in_progress {
+            background-color: #fff3cd;
+            color: #664d03;
+        }
+        .status-stopping {
+            background-color: #ffe69c;
+            color: #997404;
+        }
+        .status-completed {
+            background-color: #d1e7dd;
+            color: #0f5132;
+        }
+        .status-failed {
+            background-color: #f8d7da;
+            color: #842029;
+        }
+        .status-cancelled {
+            background-color: #e2e3e5;
+            color: #41464b;
+        }
+        .priority-badge {
+            position: absolute;
+            right: 5px;
+            top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div>
+        {% include 'nav.html' %}
+        <main>
+            <div class="container mt-4" id="task-queue-container">
+                <h1 class="mb-4">Kolejka zadań</h1>
+                
+                <!-- Flash Messages -->
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        {% for category, message in messages %}
+                            <div class="alert alert-{{ category if category != 'error' else 'danger' }} alert-dismissible fade show" role="alert">
+                                {{ message }}
+                                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                            </div>
+                        {% endfor %}
+                    {% endif %}
+                {% endwith %}
+                
+                {% if idle_info is defined %}
+                <!-- Idle status panel (small, non-intrusive) -->
+                <div class="row mb-3" id="idle-status-panel">
+                    <div class="col-12">
+                        <div class="card">
+                            <div class="card-body py-2 d-flex align-items-center gap-3">
+                                <div>
+                                    <span class="badge bg-{{ 'success' if idle_info.active else 'secondary' }}">{%- if idle_info.enabled and idle_info.active -%}Bezczynny: aktywny{%- elif idle_info.enabled -%}Bezczynny: włączony{%- else -%}Bezczynny: wyłączony{%- endif -%}</span>
+                                </div>
+                                <div>
+                                    {% if idle_info.enabled and idle_info.active %}
+                                        <small class="text-muted">Wydział:</small>
+                                        <strong class="ms-1">{{ idle_info.code or '-' }}</strong>
+                                    {% elif idle_info.enabled %}
+                                        <small class="text-muted">Tryb bezczynności włączony, brak aktywnego zadania</small>
+                                    {% else %}
+                                        <small class="text-muted">Tryb bezczynności wyłączony</small>
+                                    {% endif %}
+                                </div>
+                                <div class="ms-auto">
+                                    <small class="text-muted">Pobrane (z bazy):</small>
+                                    <strong class="ms-1">
+                                        {{ idle_info.downloaded_count if idle_info.downloaded_count is defined else (idle_info.last_processed if idle_info.last_processed is not none else '-') }}
+                                    </strong>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- Task Queue Stats -->
+                <div class="row mb-4">
+                    <div class="col-md-3">
+                        <div class="card text-bg-info">
+                            <div class="card-body text-center">
+                                <h5 class="card-title">Oczekujące</h5>
+                                <p class="card-text display-4">{{ pending_count }}</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card text-bg-warning">
+                            <div class="card-body text-center">
+                                <h5 class="card-title">W toku</h5>
+                                <p class="card-text display-4">{{ in_progress_count }}</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card text-bg-success">
+                            <div class="card-body text-center">
+                                <h5 class="card-title">Ukończone</h5>
+                                <p class="card-text display-4">{{ completed_count }}</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card text-bg-danger">
+                            <div class="card-body text-center">
+                                <h5 class="card-title">Niepowodzenia</h5>
+                                <p class="card-text display-4">{{ failed_count }}</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Current Task -->
+                {% if current_task %}
+                <div class="row mb-4">
+                    <div class="col-12">
+                        <div class="card border-warning">
+                            <div class="card-header bg-warning text-dark">
+                                Bieżące zadanie
+                            </div>
+                            <div class="card-body">
+                                <h5 class="card-title">Kod wydziału: {{ current_task.department_code }}</h5>
+                                <p class="card-text">
+                                    Zakres: {{ current_task.start_from }} - {{ current_task.end_at }} <br>
+                                    {% set attempts = current_task.books_processed if current_task.books_processed is not none else 0 %}
+                                    <strong>Przetworzone:</strong> <strong>{{ attempts }}</strong> / {{ current_task.books_total }}
+                                </p>
+                                <div class="progress">
+                                    {% set progress_attempts = (attempts / current_task.books_total * 100) if current_task.books_total > 0 else 0 %}
+                                    {% if progress_attempts > 100 %}
+                                        {% set progress_attempts = 100 %}
+                                    {% endif %}
+                                    <div class="progress-bar bg-warning" role="progressbar" 
+                                        style="width: {{ progress_attempts|int }}%" 
+                                        aria-valuenow="{{ progress_attempts|int }}" 
+                                        aria-valuemin="0" 
+                                        aria-valuemax="100">
+                                        {{ progress_attempts|int }}% (Przetworzone)
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- Add Task Form -->
+                <div class="row mb-4">
+                    <div class="col-12">
+                        <div class="card">
+                            <div class="card-header">
+                                Dodaj nowe zadanie do kolejki
+                            </div>
+                            <div class="card-body">
+                                <form method="post" action="{{ url_for('add_to_queue') }}" class="row g-3">
+                                    <div class="col-md-4">
+                                        <label for="department_code" class="form-label">Kod Wydziału</label>
+                                        <select class="form-select" id="department_code" name="department_code" required>
+                                            <option value="">Wybierz kod wydziału</option>
+                                            {% for dept in department_codes %}
+                                            <option value="{{ dept['code'] }}">{{ dept['description'] }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label for="start_from" class="form-label">Od numeru</label>
+                                        <input type="number" class="form-control" id="start_from" name="start_from" value="0" min="0">
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label for="end_at" class="form-label">Do numeru</label>
+                                        <input type="number" class="form-control" id="end_at" name="end_at" value="999999" min="0">
+                                    </div>
+                                    <div class="col-md-2">
+                                        <label for="priority" class="form-label">Priorytet</label>
+                                        <input type="number" class="form-control" id="priority" name="priority" value="0" min="0">
+                                    </div>
+                                    <div class="col-12">
+                                        <button type="submit" class="btn btn-primary">Dodaj do kolejki</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Task Queue -->
+                <div class="row">
+                    <div class="col-12">
+                        <div class="d-flex justify-content-between mb-2">
+                            <h2>Zadania w kolejce</h2>
+                            <div>
+                                <span class="text-muted refresh-status" id="refresh-status">Aktualizacja za: 30s</span>
+                                <button class="btn btn-sm btn-outline-secondary ms-2" id="refresh-btn">
+                                    <i class="bi bi-arrow-repeat"></i> Odśwież
+                                </button>
+                            </div>
+                        </div>
+                        {% if tasks.items %}
+                        <div class="table-responsive">
+                            <table class="table table-striped table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>Kod wydziału</th>
+                                        <th>Zakres</th>
+                                        <th>Priorytet</th>
+                                        <th>Status</th>
+                                        <th>Data utworzenia</th>
+                                        <th>Akcje</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for task in tasks.items %}
+                                    <tr>
+                                        <td>{{ task.id }}</td>
+                                        <td>{{ task.department_code }}</td>
+                                        <td>{{ task.start_from }} - {{ task.end_at }}</td>
+                                        <td>
+                                            {% if task.priority > 0 %}
+                                            <span class="badge bg-info">{{ task.priority }}</span>
+                                            {% else %}
+                                            {{ task.priority }}
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            <span class="badge
+                                                {% if task.status == 'pending' %}bg-info
+                                                {% elif task.status == 'in_progress' %}bg-warning
+                                                {% elif task.status == 'stopping' %}bg-warning text-white
+                                                {% elif task.status == 'completed' %}bg-success
+                                                {% elif task.status == 'failed' %}bg-danger
+                                                {% elif task.status == 'stopped' %}bg-secondary
+                                                {% elif task.status == 'cancelled' %}bg-secondary
+                                                {% endif %}">
+                                                {{ task.status }}
+                                            </span>
+                                        </td>
+                                        
+                                        <td>{{ task.date_created.strftime('%Y-%m-%d %H:%M') }}</td>
+                                        <td>
+                                            {% if task.status == 'pending' %}
+                                            <form method="post" action="{{ url_for('cancel_queued_task', task_id=task.id) }}" class="d-inline">
+                                                <button type="submit" class="btn btn-sm btn-danger">Anuluj</button>
+                                            </form>
+                                            {% elif task.status == 'in_progress' %}
+                                            <form method="post" action="{{ url_for('stop_queued_task', task_id=task.id) }}" class="d-inline">
+                                                <button type="submit" class="btn btn-sm btn-warning">Zatrzymaj</button>
+                                            </form>
+                                            {% elif task.status in ['completed', 'failed', 'cancelled', 'stopped'] %}
+                                            <div class="btn-group">
+                                                <form method="post" action="{{ url_for('requeue_task', task_id=task.id) }}" class="d-inline">
+                                                    <button type="submit" class="btn btn-sm btn-secondary">Ponów</button>
+                                                </form>
+                                                <form method="post" action="{{ url_for('delete_queued_task', task_id=task.id) }}" class="d-inline ms-1">
+                                                    <button type="submit" class="btn btn-sm btn-outline-danger" 
+                                                          onclick="return confirm('Czy na pewno chcesz usunąć to zadanie?')">
+                                                        <i class="bi bi-trash"></i>
+                                                    </button>
+                                                </form>
+                                            </div>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <!-- Pagination -->
+                        {% if tasks.pages > 1 %}
+                        <nav aria-label="Page navigation">
+                            <ul class="pagination justify-content-center">
+                                <li class="page-item {% if tasks.page == 1 %}disabled{% endif %}">
+                                    <a class="page-link" href="{{ url_for('zadania', page=tasks.prev_num) if tasks.has_prev else '#' }}" aria-label="Previous">
+                                        <span aria-hidden="true">&laquo;</span>
+                                    </a>
+                                </li>
+                                
+                                {% for page_num in range(1, tasks.pages + 1) %}
+                                <li class="page-item {% if page_num == tasks.page %}active{% endif %}">
+                                    <a class="page-link" href="{{ url_for('zadania', page=page_num) }}">{{ page_num }}</a>
+                                </li>
+                                {% endfor %}
+                                
+                                <li class="page-item {% if tasks.page == tasks.pages %}disabled{% endif %}">
+                                    <a class="page-link" href="{{ url_for('zadania', page=tasks.next_num) if tasks.has_next else '#' }}" aria-label="Next">
+                                        <span aria-hidden="true">&raquo;</span>
+                                    </a>
+                                </li>
+                            </ul>
+                        </nav>
+                        {% endif %}
+                        
+                        {% else %}
+                        <div class="alert alert-info">
+                            Brak zadań w kolejce. Dodaj nowe zadanie, aby rozpocząć.
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </main>
+        <footer></footer>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <script>
+        $(document).ready(function() {
+            let refreshTimer;
+            let countdownSeconds = 30;
+            
+            // Function to refresh the task queue
+            function refreshTaskQueue() {
+                $.ajax({
+                    url: window.location.href,
+                    success: function(data) {
+                        // Convert the HTML string into a DOM object we can query
+                        const newDOM = $(data);
+                        
+                        // Update task stats (counts)
+                        $('.card.text-bg-info .display-4').text(newDOM.find('.card.text-bg-info .display-4').text());
+                        $('.card.text-bg-warning .display-4').text(newDOM.find('.card.text-bg-warning .display-4').text());
+                        $('.card.text-bg-success .display-4').text(newDOM.find('.card.text-bg-success .display-4').text());
+                        $('.card.text-bg-danger .display-4').text(newDOM.find('.card.text-bg-danger .display-4').text());
+                        
+                        // Update idle status panel
+                        const newIdlePanel = newDOM.find('#idle-status-panel');
+                        const currentIdlePanel = $('#idle-status-panel');
+                        if (newIdlePanel.length && currentIdlePanel.length) {
+                            currentIdlePanel.replaceWith(newIdlePanel);
+                        } else if (newIdlePanel.length && !currentIdlePanel.length) {
+                            // Insert idle panel above stats if missing
+                            $('.container #task-queue-container').find('.row.mb-4').first().before(newIdlePanel);
+                        }
+
+                        // Update current task section if it exists
+                        const newCurrentTask = newDOM.find('.card.border-warning');
+                        const currentTaskSection = $('.card.border-warning');
+                        
+                        if (newCurrentTask.length) {
+                            if (currentTaskSection.length) {
+                                // Update existing current task
+                                currentTaskSection.replaceWith(newCurrentTask);
+                            } else {
+                                // Add new current task section if it wasn't there before
+                                newCurrentTask.insertAfter($('.row.mb-4').first());
+                            }
+                        } else if (currentTaskSection.length) {
+                            // Remove current task section if it no longer exists
+                            currentTaskSection.parent().parent().remove();
+                        }
+                        
+                        // Update task table
+                        const newTable = newDOM.find('.table-responsive');
+                        if (newTable.length) {
+                            if ($('.table-responsive').length) {
+                                // Update the entire table to reflect new statuses and actions
+                                $('.table-responsive').replaceWith(newTable);
+                            } else {
+                                // Add table if there wasn't one before
+                                const alertInfo = $('.alert.alert-info');
+                                if (alertInfo.length) {
+                                    alertInfo.replaceWith(newTable);
+                                } else {
+                                    $('.col-12').append(newTable);
+                                }
+                            }
+                        } else {
+                            // Show "no tasks" message if there is no table in the new content
+                            const newAlertInfo = newDOM.find('.alert.alert-info');
+                            if (newAlertInfo.length && !$('.alert.alert-info').length) {
+                                $('.table-responsive').replaceWith(newAlertInfo);
+                            }
+                        }
+                        
+                        // Update pagination if it exists
+                        const newPagination = newDOM.find('nav[aria-label="Page navigation"]');
+                        const currentPagination = $('nav[aria-label="Page navigation"]');
+                        
+                        if (newPagination.length) {
+                            if (currentPagination.length) {
+                                currentPagination.replaceWith(newPagination);
+                            } else {
+                                // Add pagination if it wasn't there before
+                                $('.col-12').append(newPagination);
+                            }
+                        } else if (currentPagination.length) {
+                            // Remove pagination if it no longer exists
+                            currentPagination.remove();
+                        }
+                        
+                        // Reattach event handlers to buttons that need confirmation
+                        $('button[onclick="return confirm(\'Czy na pewno chcesz usunąć to zadanie?\')"]').click(function() {
+                            return confirm('Czy na pewno chcesz usunąć to zadanie?');
+                        });
+                        
+                        // Reinitialize the refresh timer
+                        startRefreshTimer();
+                        console.log("Task queue refreshed successfully");
+                    },
+                    error: function(xhr, status, error) {
+                        console.error('Failed to refresh task queue:', error);
+                        $('#refresh-status').text('Błąd odświeżania! Spróbuj ponownie.');
+                        // Still restart the timer
+                        startRefreshTimer();
+                    }
+                });
+            }
+            
+            // Function to start the refresh timer
+            function startRefreshTimer() {
+                clearInterval(refreshTimer);
+                countdownSeconds = 30;
+                updateRefreshStatus();
+                
+                refreshTimer = setInterval(function() {
+                    countdownSeconds--;
+                    
+                    if (countdownSeconds <= 0) {
+                        clearInterval(refreshTimer);
+                        refreshTaskQueue();
+                    } else {
+                        updateRefreshStatus();
+                    }
+                }, 1000);
+            }
+            
+            // Function to update the refresh status text
+            function updateRefreshStatus() {
+                $('#refresh-status').text(`Aktualizacja za: ${countdownSeconds}s`);
+            }
+            
+            // Start the refresh timer when the page loads
+            startRefreshTimer();
+            
+            // Manual refresh button
+            $('#refresh-btn').on('click', function() {
+                clearInterval(refreshTimer);
+                $('#refresh-status').text('Odświeżanie...');
+                refreshTaskQueue();
+            });
+        });
+    </script>
+</body>
+</html>

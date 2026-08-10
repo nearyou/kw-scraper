@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+
+{% block title %}Zarządzanie Proxy{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>Zarządzanie Proxy</h2>
+
+    <!-- Flash Messages -->
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="alert alert-{{ category }}">{{ message }}</div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+
+    {% if error_message %}
+        <div class="alert alert-danger">
+            <strong>Błąd:</strong> {{ error_message }}
+        </div>
+    {% endif %}
+
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5>Dodaj nowe proxy</h5>
+                </div>
+                <div class="card-body">
+                    <form action="{{ url_for('add_proxy') }}" method="POST">
+                        <div class="mb-3">
+                            <label for="host" class="form-label">Host proxy*</label>
+                            <input type="text" class="form-control" id="host" name="host" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="port" class="form-label">Port proxy*</label>
+                            <input type="text" class="form-control" id="port" name="port" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="username" class="form-label">Nazwa użytkownika <small class="text-muted">(opcjonalnie)</small></label>
+                            <input type="text" class="form-control" id="username" name="username">
+                        </div>
+                        <div class="mb-3">
+                            <label for="password" class="form-label">Hasło <small class="text-muted">(opcjonalnie)</small></label>
+                            <input type="password" class="form-control" id="password" name="password">
+                        </div>
+                        <button type="submit" class="btn btn-primary">Dodaj proxy</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5>Status</h5>
+                    <form action="{{ url_for('reset_proxies') }}" method="POST">
+                        <button type="submit" class="btn btn-warning btn-sm">Resetuj wszystkie proxy</button>
+                    </form>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <strong>Tryb testowy:</strong> 
+                        <span class="badge {% if test_mode %}bg-success{% else %}bg-danger{% endif %}">
+                            {{ "Aktywny" if test_mode else "Nieaktywny" }}
+                        </span>
+                        {% if test_mode %}
+                        <div class="alert alert-warning mt-2">
+                            <i class="bi bi-exclamation-triangle-fill"></i> Uwaga: Tryb testowy jest aktywny. Oznacza to, że scraper będzie używał połączeń bezpośrednich bez proxy, co może prowadzić do zablokowania adresu IP.
+                        </div>
+                        {% endif %}
+                    </div>
+                    <div class="mb-3">
+                        <strong>Połączenia bezpośrednie:</strong> {{ direct_count }}
+                    </div>
+                    <div class="mb-3">
+                        <strong>Proxy:</strong> {{ proxy_count }}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <h5>Lista proxy</h5>
+        </div>
+        <div class="card-body">
+            {% if proxies %}
+            <div class="table-responsive">
+                <table class="table table-striped">
+                    <thead>
+                        <tr>
+                            <th>Host</th>
+                            <th>Port</th>
+                            <th>Nazwa użytkownika</th>
+                            <th>Typ</th>
+                            <th>Status</th>
+                            <th>Liczba wywołań</th>
+                            <th>Błędy</th>
+                            <th>Akcje</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for proxy in proxies %}
+                        <tr>
+                            <td>{{ proxy.host }}</td>
+                            <td>{{ proxy.port }}</td>
+                            <td>{{ proxy.username if proxy.username else 'Brak' }}</td>
+                            <td>
+                                <span class="badge {% if proxy.is_direct %}bg-warning{% else %}bg-info{% endif %}">
+                                    {{ "Połączenie bezpośrednie" if proxy.is_direct else "Proxy" }}
+                                </span>
+                            </td>
+                            <td>
+                                <span class="badge {% if proxy.in_use %}bg-success{% else %}bg-secondary{% endif %}">
+                                    {{ "W użyciu" if proxy.in_use else "Dostępny" }}
+                                </span>
+                                <span class="badge {% if proxy.cookies_valid %}bg-success{% else %}bg-secondary{% endif %}">
+                                    {{ "Ciasteczka poprawne" if proxy.cookies_valid else "Ciasteczka niepoprawne" }}
+                                </span>
+                            </td>
+                            <td>{{ proxy.call_count }}</td>
+                            <td>{{ proxy.failure_count }}</td>
+                            <td>
+                                <form action="{{ url_for('delete_proxy', proxy_id=proxy.id) }}" method="POST" class="d-inline">
+                                    <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('Czy na pewno chcesz usunąć to proxy?');">
+                                        Usuń
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="alert alert-warning">
+                <strong>Nie znaleziono żadnych proxy.</strong> Dodaj proxy za pomocą formularza po lewej stronie, aby rozpocząć.
+                <p class="mt-2">Scraper wymaga co najmniej jednego proxy do działania w trybie normalnym.</p>
+                <p>Alternatywnie możesz ustawić <code>TEST_MODE=1</code> w swoim środowisku, aby pominąć wymaganie proxy (tylko do testów).</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

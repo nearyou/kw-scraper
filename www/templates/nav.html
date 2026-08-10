@@ -1,0 +1,159 @@
+<header class="d-flex justify-content-between align-items-center">
+    <div class="d-flex flex-row align-items-center">
+        {% if url_for(request.endpoint) == '/home' %}
+        <b>
+        {% endif %}
+        <a href="/home" class="nav-element me-3">Strona główna</a>
+        {% if url_for(request.endpoint) == '/home' %}
+        </b>
+        {% endif %}
+
+        {% if url_for(request.endpoint) == '/list' %}
+        <b>
+        {% endif %}
+        <a href="/list" class="nav-element me-3">Przeglądaj</a>
+        {% if url_for(request.endpoint) == '/list' %}
+        </b>
+        {% endif %}
+
+        {% if current_user.is_admin %}
+        {% if url_for(request.endpoint) == 'zadania' %}
+        <b>
+        {% endif %}
+        <a href="{{ url_for('zadania') }}" class="nav-element me-3">Zadania</a>
+        {% if url_for(request.endpoint) == 'zadania' %}
+        </b>
+        {% endif %}
+        
+        {% if url_for(request.endpoint) == 'proxy_list' %}
+        <b>
+        {% endif %}
+        <a href="{{ url_for('proxy_list') }}" class="nav-element me-3">Proxy</a>
+        {% if url_for(request.endpoint) == 'proxy_list' %}
+        </b>
+        {% endif %}
+        
+        {% if url_for(request.endpoint) == 'admin_panel' %}
+        <b>
+        {% endif %}
+        <a href="{{ url_for('admin_panel') }}" class="nav-element me-3">Admin</a>
+        {% if url_for(request.endpoint) == 'admin_panel' %}
+        </b>
+        {% endif %}
+        {% endif %}
+
+    </div>
+    <div>
+        <a id="logout" href="/logout">
+        <span>Wyloguj</span>
+        </a>
+    </div>
+</header>
+
+<div class="modal fade" id="scraperModal" tabindex="-1" aria-labelledby="scraperModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="scraperModalLabel">Wybierz opcję scrapera</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="scrapingForm" method="POST" action="{{ url_for('start_scraping') }}" class="mb-3">
+                    <div class="mb-3">
+                        <label for="department_code" class="form-label">Kod Wydziału</label>
+                        <input type="text" class="form-control" id="department_code" name="department_code" placeholder="Wprowadź kod wydziału" value="{{ department_code }}">
+                    </div>
+                    <div class="mb-3">
+                        <label for="start_from" class="form-label">Start</label>
+                        <input type="number" class="form-control" id="start_from" name="start_from" placeholder="Początkowa wartość" value="{{ start_from }}">
+                    </div>
+                    <div class="mb-3">
+                        <label for="end_at" class="form-label">Koniec</label>
+                        <input type="number" class="form-control" id="end_at" name="end_at" placeholder="Końcowa wartość" value="{{ end_at }}">
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100" {% if button_disabled %} disabled="disabled" {% endif %}>Uruchom scraper dla jednego kodu</button>
+                </form>
+
+                <form id="allScrapingForm" method="POST" action="{{ url_for('start_all_scraping') }}">
+                    <button type="submit" class="btn btn-secondary w-100">Uruchom scraper dla wszystkich kodów</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.getElementById('scrapingForm').addEventListener('submit', function(event) {
+        event.preventDefault();
+
+        const startFrom = parseInt(document.getElementById('start_from').value, 10);
+        const endAt = parseInt(document.getElementById('end_at').value, 10);
+
+        if (endAt < startFrom) {
+            alert('Wartość końcowa nie może być mniejsza od wartości początkowej');
+            return; // Stop the form submission
+        }
+
+        var form = this;
+        var formData = new FormData(form);
+
+        fetch(form.action, {
+            method: 'POST',
+            body: formData,
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        })
+        .then(response => {
+            if (response.ok) {
+                return response.text();
+            } else {
+                throw new Error('Błąd');
+            }
+        })
+        .then(data => {
+            alert('Aktywowano scraper');
+            var modal = bootstrap.Modal.getInstance(document.getElementById('scraperModal'));
+            modal.hide();
+            document.body.classList.remove('modal-open');
+            document.querySelector('.modal-backdrop').remove();
+            window.location.reload();
+        })
+        .catch(error => {
+            alert('Nie udało się uruchomić scrapera ' + error.message);
+        });
+    });
+
+    document.getElementById('allScrapingForm').addEventListener('submit', function(event) {
+        event.preventDefault();
+
+        var form = this;
+        var formData = new FormData(form);
+
+        fetch(form.action, {
+            method: 'POST',
+            body: formData,
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        })
+        .then(response => {
+            if (response.ok) {
+                return response.text();
+            } else {
+                throw new Error('Błąd');
+            }
+        })
+        .then(data => {
+            alert('Aktywowano scraper dla wszystkich kodów');
+            var modal = bootstrap.Modal.getInstance(document.getElementById('scraperModal'));
+            modal.hide();
+            document.body.classList.remove('modal-open');
+            document.querySelector('.modal-backdrop').remove();
+        })
+        .catch(error => {
+            alert('Nie udało się uruchomić scrapera ' + error.message);
+        });
+    });
+
+</script>

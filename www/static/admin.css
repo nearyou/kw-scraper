@@ -1,0 +1,215 @@
+header {
+    background-color: #162635;
+    color: #cccccc;
+    padding: 20px;
+}
+
+.styled-buttons {
+    display: flex;
+    justify-content: center;
+}
+
+.styled-buttons > * {
+    width: 190px !important;
+    height: 40px !important;
+}
+
+a > .pagination-button {
+    text-decoration: none;
+    color: #cccccc;
+    font-family: Verdana, Geneva, Tahoma, sans-serif;
+    font-size: 21px;
+}
+
+.nav-element {
+    text-decoration: none;
+    color: #cccccc;
+}
+
+.nav-element:hover {
+    text-decoration: underline;
+}
+
+main {
+    padding: 20px;
+}
+
+#logout {
+    text-decoration: none;
+    color: #cccccc;
+}
+
+#logout:hover {
+    text-decoration: underline;
+}
+
+main {
+    padding-bottom: 80px !important;
+}
+
+footer {
+    font-size: 18px;
+    background-color: #162635;
+    color: #cccccc;
+    position: fixed;
+    padding: 20px 0;
+    width: 100%;
+    height: 60px;
+    bottom: 0;
+}
+
+.btn-disabled {
+    pointer-events: none;
+    background-color: #6c757d;
+    border-color: #6c757d;
+}
+
+td, .badge {
+    font-size: 16px;
+}
+
+.text-bg-hipoteka {
+    background-color: #170065 !important;
+    color: #fff;
+}
+
+.text-bg-note {
+    background-color: #b10047 !important;
+    color: #fff;
+}
+
+.text-bg-darowizna {
+    background-color: #00005f !important;
+    color: #fff;
+}
+
+.text-bg-egzekucja {
+    background-color: #ff2a00 !important;
+    color: #fff;
+}
+
+.text-bg-spadek {
+    background-color: #3a0000 !important;
+    color: #fff;
+}
+
+.text-bg-dziedziczenie {
+    background-color: #308101 !important;
+    color: #fff;
+}
+
+#display {
+    padding-bottom: 150px;
+}
+
+.toggler {
+    position: relative;
+    border: 1px solid black;
+    padding-right: 30px;
+    font-size: 18px;
+}
+
+.toggler::after {
+    content: '\25BC';
+    position: absolute;
+    right: 10px;
+    top: 6px;
+    transition: transform 0.3s;
+}
+
+.toggler[aria-expanded="true"]::after {
+    transform: rotate(180deg);
+}
+.custom-height {
+  height: 46px; /* zmiana forma wysokosci  */
+}
+
+/* --- Admin panel consistency and button improvements --- */
+.card, .task-card, .worker-item {
+    border-radius: 12px !important;
+    box-shadow: 0 2px 8px rgba(22,38,53,0.04);
+    border: 1px solid #e0e0e0;
+    background: #fff;
+}
+
+.card-header.bg-dark {
+    background: #162635 !important;
+    color: #fff !important;
+    border-radius: 12px 12px 0 0 !important;
+}
+
+.btn, .btn-sm, .btn-primary, .btn-danger, .btn-success, .btn-warning, .btn-secondary, .btn-outline-danger, .btn-outline-secondary {
+    border-radius: 8px !important;
+    font-size: 1rem;
+    font-weight: 500;
+    transition: background 0.2s, color 0.2s, box-shadow 0.2s;
+    box-shadow: 0 2px 6px rgba(22,38,53,0.07);
+}
+
+.btn:focus, .btn:hover {
+    filter: brightness(0.95);
+    box-shadow: 0 4px 12px rgba(22,38,53,0.10);
+}
+
+.btn-outline-danger, .btn-outline-secondary {
+    border-width: 2px !important;
+}
+
+.btn-sm {
+    padding: 0.35rem 0.8rem !important;
+    font-size: 0.95rem !important;
+}
+
+.badge-task-count {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    font-size: 0.7em;
+    padding: 0.3em 0.6em;
+    border-radius: 8px;
+}
+
+.worker-item {
+    border-left: 5px solid #28a745;
+    border-radius: 10px;
+    background: #f8f9fa;
+}
+
+.worker-item .card-body {
+    padding: 0.7rem 1rem;
+}
+
+.pagination .page-link {
+    border-radius: 6px !important;
+}
+
+.modal-content {
+    border-radius: 16px !important;
+}
+
+.form-select, .form-control {
+    border-radius: 8px !important;
+}
+
+.alert {
+    border-radius: 10px !important;
+}
+
+.command-tip {
+    background-color: #f8f9fa;
+    border-left: 5px solid #6c757d;
+    padding: 10px 15px;
+    font-family: monospace;
+    margin: 15px 0;
+    border-radius: 8px;
+}
+
+.progress {
+    height: 20px;
+    border-radius: 8px;
+    background: #e9ecef;
+}
+
+.progress-bar {
+    border-radius: 8px;
+}
