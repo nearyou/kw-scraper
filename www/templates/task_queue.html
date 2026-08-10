@@ -253,7 +253,7 @@
                                                 {% elif task.status == 'in_progress' %}bg-warning
                                                 {% elif task.status == 'stopping' %}bg-warning text-white
                                                 {% elif task.status == 'completed' %}bg-success
-                                                {% elif task.status == 'failed' %}bg-danger
+                                                {% elif task.status in ['failed', 'dead_letter'] %}bg-danger
                                                 {% elif task.status == 'stopped' %}bg-secondary
                                                 {% elif task.status == 'cancelled' %}bg-secondary
                                                 {% endif %}">
@@ -271,7 +271,7 @@
                                             <form method="post" action="{{ url_for('stop_queued_task', task_id=task.id) }}" class="d-inline">
                                                 <button type="submit" class="btn btn-sm btn-warning">Zatrzymaj</button>
                                             </form>
-                                            {% elif task.status in ['completed', 'failed', 'cancelled', 'stopped'] %}
+                                            {% elif task.status in ['completed', 'failed', 'dead_letter', 'cancelled', 'stopped'] %}
                                             <div class="btn-group">
                                                 <form method="post" action="{{ url_for('requeue_task', task_id=task.id) }}" class="d-inline">
                                                     <button type="submit" class="btn btn-sm btn-secondary">Ponów</button>

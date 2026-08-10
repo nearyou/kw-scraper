@@ -39,6 +39,7 @@ import tenacity  # Make sure we import tenacity for RetryError handling
 from unidecode import unidecode
 
 import sentry_sdk
+from www.queue_handler import ReliableQueueHandler
 
 load_dotenv()
 
@@ -282,8 +283,16 @@ def scrape_task(self, department_code, start_from=0, end_at=999999, resume_from_
         raise
 
 
-@celery.task(name="scraping.queue_manager", bind=True, max_retries=None,
-             acks_late=False, reject_on_worker_lost=False)
+@celery.task(
+    name="scraping.queue_manager",
+    bind=True,
+    max_retries=None,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_jitter=False,
+    acks_late=True,
+    reject_on_worker_lost=True,
+)
 def queue_manager_task(self):
     """
     Task queue manager that picks the next task from the queue and processes it.
@@ -386,25 +395,40 @@ def queue_manager_task(self):
                     next_task.status = 'in_progress'
                     next_task.books_total = next_task.end_at - next_task.start_from + 1
                     db.session.commit()
-                    try:
-                        # Use a single pool of DOWNLOAD_WORKERS for this task
-                        # All workers share the same book queue for this task
+                    def process_queue_message(message):
+                        # A rollback gives every retry a clean database session.
+                        db.session.rollback()
                         scrape_task_direct(
-                            next_task.id,
-                            next_task.department_code, 
-                            next_task.start_from, 
-                            next_task.end_at
+                            message.id,
+                            message.department_code,
+                            message.start_from,
+                            message.end_at,
                         )
-                        # The task status is already updated inside scrape_task_direct
-                        print(f"Task {next_task.id} processing completed")
-                    except Exception as e:
-                        print(f"Error during task {next_task.id}: {str(e)}")
-                        # Get fresh task instance in case of error
-                        error_task = TaskQueue.query.get(next_task.id)
-                        if error_task:
-                            # Do not mark regular queue tasks as 'failed' automatically
-                            error_task.status = 'stopped'
+
+                    def acknowledge_queue_message(message):
+                        db.session.rollback()
+                        acknowledged_task = TaskQueue.query.get(message.id)
+                        if acknowledged_task:
+                            print(
+                                f"Task {message.id} processed successfully "
+                                f"(status: {acknowledged_task.status})"
+                            )
+
+                    def dead_letter_queue_message(message, error):
+                        db.session.rollback()
+                        failed_task = TaskQueue.query.get(message.id)
+                        if failed_task:
+                            failed_task.status = 'dead_letter'
                             db.session.commit()
+                        print(f"Task {message.id} moved to dead-letter queue: {error}")
+
+                    # One handler call fully owns this message, so no later task can
+                    # start until it succeeds or exhausts the 1s/2s/4s retry schedule.
+                    ReliableQueueHandler(
+                        process_message=process_queue_message,
+                        acknowledge_message=acknowledge_queue_message,
+                        dead_letter_message=dead_letter_queue_message,
+                    ).handle(next_task)
                 else:
                     # No regular tasks - check for idle tasks
                     from www.models import IdleTasks
@@ -2115,7 +2139,7 @@ def zadania():
     pending_count = TaskQueue.query.filter_by(status='pending').count()
     in_progress_count = TaskQueue.query.filter_by(status='in_progress').count()
     completed_count = TaskQueue.query.filter_by(status='completed').count()
-    failed_count = TaskQueue.query.filter_by(status='failed').count()
+    failed_count = TaskQueue.query.filter(TaskQueue.status.in_(['failed', 'dead_letter'])).count()
     
     # Get idle task statistics
     from www.models import IdleTasks
@@ -2349,9 +2373,9 @@ def cancel_queued_task(task_id):
 @login_required
 @admin_required
 def requeue_task(task_id):
-    """Requeue a failed, completed, or stopped task by setting status to pending"""
+    """Requeue a failed, dead-lettered, completed, or stopped task."""
     task = TaskQueue.query.get_or_404(task_id)
-    if task.status in ['failed', 'completed', 'cancelled', 'stopped']:
+    if task.status in ['failed', 'dead_letter', 'completed', 'cancelled', 'stopped']:
         if task.status == 'completed':
             # Reset progress for completed tasks
             task.books_processed = 0
@@ -2384,11 +2408,11 @@ def stop_queued_task(task_id):
 @login_required
 @admin_required
 def delete_queued_task(task_id):
-    """Delete a task from the queue if it's stopped, completed, failed, or cancelled"""
+    """Delete a task that is no longer running."""
     task = TaskQueue.query.get_or_404(task_id)
     
     # Only allow deletion of tasks that are not running
-    if task.status in ['stopped', 'completed', 'failed', 'cancelled']:
+    if task.status in ['stopped', 'completed', 'failed', 'dead_letter', 'cancelled']:
         db.session.delete(task)
         db.session.commit()
         flash(f"Task {task_id} has been deleted.", "success")
@@ -2789,4 +2813,3 @@ def parse_date(date_str):
 
 if __name__ == '__main__':
     app.run(debug=False, host="0.0.0.0", port=8000)
-

@@ -63,7 +63,8 @@ class TaskQueue(db.Model):
     start_from = db.Column(db.Integer, default=0, nullable=False)
     end_at = db.Column(db.Integer, default=999999, nullable=False)
     priority = db.Column(db.Integer, default=0)  # Higher number = higher priority
-    status = db.Column(db.String(20), default='pending')  # pending, in_progress, stopping, stopped, completed
+    # dead_letter means processing failed after all three retries.
+    status = db.Column(db.String(20), default='pending')  # pending, in_progress, stopping, stopped, completed, dead_letter
     books_total = db.Column(db.Integer, default=0)
     books_processed = db.Column(db.Integer, default=0)
     last_scraped_book = db.Column(db.String(50), nullable=True)  # Stores the last book number that was scraped
