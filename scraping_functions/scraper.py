@@ -3,6 +3,8 @@ import logging
 import os
 import random
 import re
+import json
+import tempfile
 
 # Import the Proxy model
 import sys
@@ -17,7 +19,7 @@ from DrissionPage import ChromiumOptions, ChromiumPage
 
 # Import SQLAlchemy dependencies
 from sqlalchemy import create_engine
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import scoped_session, sessionmaker
 
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -32,6 +34,7 @@ from scraping_functions.errors import (
 )
 from scraping_functions.resilience import CircuitBreaker, backoff_delay, retry_external_call
 from scraping_functions.session_manager import BrowserSessionManager, DEFAULT_HEADERS
+from scraping_functions.proxy_config import load_proxy_settings
 
 # Load environment variables
 load_dotenv()
@@ -94,42 +97,37 @@ def create_proxy_auth_extension(host, port, username, password, scheme="http"):
     Creates a Chrome extension to handle proxy authentication.
     Returns the path to the extension directory.
     """
-    # Create unique path based on ALL credentials to avoid collisions with sticky sessions (same host:port)
-    creds_hash = hashlib.md5(f"{host}{port}{username}{password}".encode()).hexdigest()[
-        :8
-    ]
-    plugin_path = f"/tmp/proxy_auth_plugin_{host}_{port}_{creds_hash}"
+    # Hash all credentials so concurrent sticky sessions never share an extension.
+    # The credentials themselves are never placed in a directory name or log line.
+    creds_hash = hashlib.md5(
+        f"{scheme}{host}{port}{username}{password}".encode()
+    ).hexdigest()[:8]
+    safe_host = re.sub(r"[^a-zA-Z0-9.-]", "_", str(host))
+    plugin_path = os.path.join(
+        tempfile.gettempdir(), f"proxy_auth_plugin_{safe_host}_{port}_{creds_hash}"
+    )
     os.makedirs(plugin_path, exist_ok=True)
 
-    manifest_json = """
-    {
+    # Manifest V3 is required by current Chromium releases. webRequestAuthProvider
+    # lets the extension answer the proxy's HTTP 407 authentication challenge.
+    manifest = {
         "version": "1.0.0",
-        "manifest_version": 2,
-        "name": "Chrome Proxy",
-        "permissions": [
-            "proxy",
-            "tabs",
-            "unlimitedStorage",
-            "storage",
-            "<all_urls>",
-            "webRequest",
-            "webRequestBlocking"
-        ],
-        "background": {
-            "scripts": ["background.js"]
-        },
-        "minimum_chrome_version": "22.0.0"
+        "manifest_version": 3,
+        "name": "KW Scraper Proxy",
+        "permissions": ["proxy", "storage", "webRequest", "webRequestAuthProvider"],
+        "host_permissions": ["<all_urls>"],
+        "background": {"service_worker": "background.js"},
+        "minimum_chrome_version": "88",
     }
-    """
 
-    background_js = f"""
+    background_js = """
     var config = {{
         mode: "fixed_servers",
         rules: {{
             singleProxy: {{
-                scheme: "{scheme}",
-                host: "{host}",
-                port: parseInt({port})
+                scheme: {scheme},
+                host: {host},
+                port: {port}
             }},
             bypassList: ["localhost"]
         }}
@@ -137,26 +135,32 @@ def create_proxy_auth_extension(host, port, username, password, scheme="http"):
 
     chrome.proxy.settings.set({{value: config, scope: "regular"}}, function() {{}});
 
-    function callbackFn(details) {{
-        return {{
+    function callbackFn(details, callback) {{
+        callback({{
             authCredentials: {{
-                username: "{username}",
-                password: "{password}"
+                username: {username},
+                password: {password}
             }}
-        }};
+        }});
     }}
 
     chrome.webRequest.onAuthRequired.addListener(
-                callbackFn,
-                {{urls: ["<all_urls>"]}},
-                ['blocking']
+        callbackFn,
+        {{urls: ["<all_urls>"]}},
+        ['asyncBlocking']
     );
-    """
+    """.format(
+        scheme=json.dumps(str(scheme)),
+        host=json.dumps(str(host)),
+        port=int(port),
+        username=json.dumps(str(username or "")),
+        password=json.dumps(str(password or "")),
+    )
 
-    with open(os.path.join(plugin_path, "manifest.json"), "w") as f:
-        f.write(manifest_json)
+    with open(os.path.join(plugin_path, "manifest.json"), "w", encoding="utf-8") as f:
+        json.dump(manifest, f)
 
-    with open(os.path.join(plugin_path, "background.js"), "w") as f:
+    with open(os.path.join(plugin_path, "background.js"), "w", encoding="utf-8") as f:
         f.write(background_js)
 
     return plugin_path
@@ -233,16 +237,34 @@ def create_fresh_browser(proxy=None, user_agent=None, headers=None):
     if proxy and not proxy.is_direct and proxy.host:
         try:
             extension_path = create_proxy_auth_extension(
-                proxy.host, proxy.port, proxy.username, proxy.password
+                proxy.host,
+                proxy.port,
+                proxy.username,
+                proxy.password,
+                getattr(proxy, "scheme", os.getenv("PROXY_SCHEME", "http")),
             )
             co.add_extension(extension_path)
-            print(f"DEBUG: Added proxy extension from {extension_path}", flush=True)
-        except Exception as pe:
-            print(f"DEBUG: Failed to create/add proxy extension: {pe}", flush=True)
-            proxy_str = (
-                f"http://{proxy.username}:{proxy.password}@{proxy.host}:{proxy.port}"
+            logger.info(
+                "authenticated_proxy_configured",
+                extra={"context": {"host": proxy.host, "port": proxy.port}},
             )
-            co.set_proxy(proxy_str)
+        except Exception as pe:
+            # Never put the proxy URL into this log because it contains the password.
+            logger.error(
+                "authenticated_proxy_configuration_failed",
+                extra={
+                    "context": {
+                        "host": proxy.host,
+                        "port": proxy.port,
+                        "cause": type(pe).__name__,
+                    }
+                },
+            )
+            raise NetworkError(
+                "Authenticated browser proxy could not be configured",
+                operation="proxy.configure_browser",
+                context={"host": proxy.host, "port": proxy.port},
+            ) from pe
 
     browser = ChromiumPage(co, timeout=PAGE_LOAD_TIMEOUT)
     browser.set.headers(headers or DEFAULT_HEADERS)
@@ -781,6 +803,7 @@ class Scraper:
             )
             self.engine = create_engine(db_url)
             self.Session = scoped_session(sessionmaker(bind=self.engine))
+            self._seed_environment_proxy()
             self.session_manager = BrowserSessionManager(
                 create_fresh_browser,
                 USER_AGENTS,
@@ -806,6 +829,56 @@ class Scraper:
             self.session_manager = None
 
     # ------- Proxy management methods -------
+
+    def _seed_environment_proxy(self):
+        """Idempotently add the environment proxy before workers start.
+
+        Each worker calls this during setup. A unique credential hash and the
+        IntegrityError fallback make simultaneous first-start inserts safe.
+        Existing counters and cookies are preserved.
+        """
+        settings = load_proxy_settings()
+        if settings is None:
+            return False
+
+        proxy_id = self._hash_proxy(
+            settings.host, settings.port, settings.username, settings.password
+        )
+        session = self.Session()
+        try:
+            if session.query(Proxy).filter_by(id=proxy_id).first() is not None:
+                return True
+
+            session.add(
+                Proxy(
+                    id=proxy_id,
+                    host=settings.host,
+                    port=settings.port,
+                    username=settings.username,
+                    password=settings.password,
+                    in_use=False,
+                    call_count=0,
+                    failure_count=0,
+                    cookies_valid=False,
+                )
+            )
+            try:
+                session.commit()
+            except IntegrityError:
+                # Another worker inserted the same proxy after our initial query.
+                session.rollback()
+                if session.query(Proxy).filter_by(id=proxy_id).first() is None:
+                    raise
+
+            logger.info(
+                "environment_proxy_ready",
+                extra={
+                    "context": {"host": settings.host, "port": settings.port}
+                },
+            )
+            return True
+        finally:
+            session.close()
 
     def get_all_proxies(self):
         """Get all proxies in the database"""

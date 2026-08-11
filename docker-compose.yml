@@ -40,6 +40,11 @@ services:
       CB_BASE: "5"
       CB_MAX: "60"
       DEPENDENCY_MAX_ATTEMPTS: "30"
+      PROXY_HOST: ${PROXY_HOST:-}
+      PROXY_PORT: ${PROXY_PORT:-33335}
+      PROXY_USERNAME: ${PROXY_USERNAME:-}
+      PROXY_PASSWORD: ${PROXY_PASSWORD:-}
+      PROXY_SCHEME: ${PROXY_SCHEME:-http}
       SERVICE_NAME: celery
       LOG_LEVEL: INFO
       LOG_FILE: /app/logs/celery.log
@@ -133,6 +138,11 @@ services:
       CB_BASE: "5"
       CB_MAX: "60"
       DEPENDENCY_MAX_ATTEMPTS: "30"
+      PROXY_HOST: ${PROXY_HOST:-}
+      PROXY_PORT: ${PROXY_PORT:-33335}
+      PROXY_USERNAME: ${PROXY_USERNAME:-}
+      PROXY_PASSWORD: ${PROXY_PASSWORD:-}
+      PROXY_SCHEME: ${PROXY_SCHEME:-http}
       SERVICE_NAME: scraper
       LOG_LEVEL: INFO
       LOG_FILE: /app/logs/scraper.log
