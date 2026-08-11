@@ -35,10 +35,10 @@ logger = logging.getLogger(__name__)
 
 try:
     # Try direct import first (for Celery worker)
-    from www.models import db, Informacje, Wlasciciele, Notatki, Status, User, ScrapingProgress, TaskStatus, TaskQueue, UserPrefixPermission, get_user_by_login, get_user, Egzekucje, Hipoteki, Spadki, Dziedziczenia, Darowizny
+    from www.models import db, Informacje, Wlasciciele, Notatki, Status, User, ScrapingProgress, TaskStatus, TaskQueue, IdleTasks, UserPrefixPermission, get_user_by_login, get_user, Egzekucje, Hipoteki, Spadki, Dziedziczenia, Darowizny
 except ImportError:
     # If that fails, try relative import (for direct script execution)
-    from models import db, Informacje, Wlasciciele, Notatki, Status, User, ScrapingProgress, TaskStatus, TaskQueue, UserPrefixPermission, get_user_by_login, get_user, Egzekucje, Hipoteki, Spadki, Dziedziczenia, Darowizny
+    from models import db, Informacje, Wlasciciele, Notatki, Status, User, ScrapingProgress, TaskStatus, TaskQueue, IdleTasks, UserPrefixPermission, get_user_by_login, get_user, Egzekucje, Hipoteki, Spadki, Dziedziczenia, Darowizny
 
 from celery import Celery, chain
 from celery.backends.base import DisabledBackend
@@ -52,6 +52,13 @@ import tenacity  # Make sure we import tenacity for RetryError handling
 from unidecode import unidecode
 
 import sentry_sdk
+from www.health import (
+    build_health_report,
+    evaluate_scraper,
+    load_scrape_metrics,
+    probe_queue,
+    probe_storage,
+)
 from www.queue_handler import ReliableQueueHandler
 
 # Import the cleaned, refactored kwscraper functions
@@ -1271,24 +1278,62 @@ def run_idle_alphabetical_scraping():
 # Health check endpoint for Docker and monitoring
 @app.route('/health')
 def health_check():
-    """Health check endpoint for Docker container monitoring.
-    Returns 200 if database is accessible, 503 otherwise.
-    """
-    from sqlalchemy import text
-    try:
-        db.session.execute(text('SELECT 1'))
-        db.session.commit()  # Release the connection back to pool
-        return jsonify({
-            'status': 'healthy',
-            'database': 'connected'
-        }), 200
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({
-            'status': 'unhealthy',
-            'database': 'disconnected',
-            'error': str(e)
-        }), 503
+    """Report queue, storage, scrape freshness, and recent error rate."""
+    queue_check = probe_queue(app.config['CELERY_BROKER_URL'])
+    storage_check = probe_storage(db.session)
+    window_seconds = int(os.getenv('HEALTH_ERROR_WINDOW_SECONDS', '3600'))
+    metrics = {
+        'successful_runs': 0,
+        'failed_runs': 0,
+        'observed_runs': 0,
+        'error_rate': 0.0,
+        'last_successful_scrape': None,
+        'window_seconds': window_seconds,
+    }
+
+    if storage_check['status'] == 'working':
+        try:
+            metrics = load_scrape_metrics(
+                db.session,
+                [
+                    (TaskQueue, TaskQueue.date_updated, ('completed',), ('dead_letter',)),
+                    (IdleTasks, IdleTasks.completed_at, ('completed',), ('failed',)),
+                ],
+                window_seconds=window_seconds,
+            )
+            db.session.rollback()  # Release the read-only metrics transaction.
+        except Exception as error:
+            db.session.rollback()
+            storage_check = {
+                'status': 'unavailable',
+                'error_type': type(error).__name__,
+            }
+            logger.warning(
+                'health_metrics_query_failed',
+                extra={'context': {'error_type': type(error).__name__}},
+            )
+
+    scraper_check = evaluate_scraper(
+        metrics,
+        max_age_seconds=int(os.getenv('HEALTH_MAX_SCRAPE_AGE_SECONDS', '86400')),
+        max_error_rate=float(os.getenv('HEALTH_MAX_ERROR_RATE', '0.25')),
+    )
+    report, status_code = build_health_report(
+        queue_check, storage_check, scraper_check
+    )
+    logger.info(
+        'health_check_completed',
+        extra={
+            'context': {
+                'status': report['status'],
+                'status_code': status_code,
+                'queue_status': queue_check['status'],
+                'storage_status': storage_check['status'],
+                'scraper_status': scraper_check['status'],
+            }
+        },
+    )
+    return jsonify(report), status_code
 
 
 @app.route('/tasks', methods=['GET'])

@@ -77,6 +77,9 @@ services:
       SERVICE_NAME: web
       LOG_LEVEL: INFO
       LOG_FILE: /app/logs/web.log
+      HEALTH_MAX_ERROR_RATE: "0.25"
+      HEALTH_ERROR_WINDOW_SECONDS: "3600"
+      HEALTH_MAX_SCRAPE_AGE_SECONDS: "86400"
     volumes:
       - app-logs:/app/logs
     healthcheck:
