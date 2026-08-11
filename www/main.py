@@ -355,16 +355,20 @@ def queue_manager_task(self):
                         print("Performing maintenance mode health check...")
                         try:
                             scraper = setup_scraper()
-                            site_healthy = scraper.check_site_health()
+                            health_result = scraper.check_site_health()
                             scraper.close()
-                            
-                            if site_healthy:
+
+                            if health_result.get('status') == 'ok':
                                 print("Site is back online! Exiting maintenance mode.")
                                 idle_status.maintenance_mode = False
                                 idle_status.last_maintenance_check = current_time
                                 db.session.commit()
                             else:
-                                print("Site still in maintenance mode.")
+                                print(
+                                    "Site still unavailable: "
+                                    f"{health_result.get('status')} - "
+                                    f"{health_result.get('message')}"
+                                )
                                 idle_status.last_maintenance_check = current_time
                                 db.session.commit()
                                 

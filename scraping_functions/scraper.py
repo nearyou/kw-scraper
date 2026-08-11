@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import os
 import random
 import re
@@ -22,6 +23,14 @@ from sqlalchemy.orm import scoped_session, sessionmaker
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.append(parent_dir)
 from www.models import Proxy, db
+from scraping_functions.errors import (
+    CaptchaError,
+    CircuitOpenError,
+    DataError,
+    NetworkError,
+    log_error,
+)
+from scraping_functions.resilience import CircuitBreaker, backoff_delay, retry_external_call
 
 # Load environment variables
 load_dotenv()
@@ -48,16 +57,18 @@ RATE_LIMIT_ENABLED = os.getenv("RATE_LIMIT_ENABLED", "true").lower() in (
 RATE_LIMIT_MIN = float(os.getenv("RATE_LIMIT_MIN", "2.0"))
 RATE_LIMIT_MAX = float(os.getenv("RATE_LIMIT_MAX", "4.0"))
 
-# Circuit-breaker DISABLED - was causing cascade failures
-# CB_THRESHOLD = int(os.getenv('CB_THRESHOLD', '3'))
-# CB_BASE = int(os.getenv('CB_BASE', '10'))
-# CB_MAX = int(os.getenv('CB_MAX', '120'))
-# CB_RESET_SECONDS = int(os.getenv('CB_RESET_SECONDS', '120'))
+logger = logging.getLogger(__name__)
 
-# DISABLED - No longer using singleton browser or circuit breaker
-# connection_failures = 0
-# last_failure_time = 0
-# BROWSER_INSTANCE = None
+# Shared by all scraper instances. Once failures cross the threshold, workers
+# pause together; after the cooldown, a single worker probes site recovery.
+GOVERNMENT_SITE_CIRCUIT = CircuitBreaker(
+    "ekw-government-site",
+    failure_threshold=int(os.getenv("CB_THRESHOLD", "5")),
+    recovery_timeout=int(os.getenv("CB_RESET_SECONDS", "60")),
+)
+EXTERNAL_RETRY_ATTEMPTS = int(os.getenv("EXTERNAL_RETRY_ATTEMPTS", "3"))
+EXTERNAL_RETRY_BASE = float(os.getenv("CB_BASE", "1"))
+EXTERNAL_RETRY_MAX = float(os.getenv("CB_MAX", "30"))
 
 # Anti-detection delays — zredukowane: residential proxy z auto IP zmienia IP na każdy request,
 # więc agresywne opóźnienia anty-detekcyjne są zbędne.
@@ -335,9 +346,37 @@ def process_tab_scraping(tab, code, number, digit, view_type="current"):
         print(f"DEBUG: Starting tab scraping for {code}/{number}/{digit}", flush=True)
 
         # 1. Navigate to menu
+        def load_menu():
+            try:
+                tab.get("https://ekw.ms.gov.pl/eukw_ogol/menu.do", timeout=30)
+            except Exception as error:
+                raise NetworkError(
+                    "Government site menu could not be loaded",
+                    operation="government_site.load_menu",
+                    context={"book": f"{code}/{number}/{digit}"},
+                ) from error
+
         try:
-            tab.get("https://ekw.ms.gov.pl/eukw_ogol/menu.do", timeout=30)
-        except Exception as e:
+            retry_external_call(
+                load_menu,
+                operation="government_site.load_menu",
+                attempts=EXTERNAL_RETRY_ATTEMPTS,
+                base_delay=EXTERNAL_RETRY_BASE,
+                max_delay=EXTERNAL_RETRY_MAX,
+                jitter=0.25,
+                circuit_breaker=GOVERNMENT_SITE_CIRCUIT,
+                record_success=False,
+                logger=logger,
+            )
+        except CircuitOpenError as error:
+            log_error(logger, error)
+            return {
+                "success": "0",
+                "code": "circuit-open",
+                "error_details": str(error),
+                "retry_after": error.retry_after,
+            }
+        except NetworkError as e:
             print(
                 f"🚨 CONNECTION ERROR: Cannot load menu page. Reason: {e}", flush=True
             )
@@ -413,6 +452,20 @@ def process_tab_scraping(tab, code, number, digit, view_type="current"):
                     tab.refresh()
             except Exception as retry_err:
                 print(f"⚠️ Error during attempt {attempt + 1}: {retry_err}", flush=True)
+            if attempt < 2:
+                delay = backoff_delay(
+                    attempt + 1,
+                    base=EXTERNAL_RETRY_BASE,
+                    maximum=EXTERNAL_RETRY_MAX,
+                    jitter=0.25,
+                )
+                logger.warning(
+                    "external_call_retry operation=government_site.search_form "
+                    "attempt=%s/3 delay_seconds=%.2f",
+                    attempt + 1,
+                    delay,
+                )
+                time.sleep(delay)
         else:
             print(f"🚨 CRITICAL: Search form not found after 3 attempts.", flush=True)
             print(f"🔍 DEBUG CONTEXT: URL={tab.url}, Title='{tab.title}'", flush=True)
@@ -851,7 +904,7 @@ class Scraper:
         try:
             start_time = time.time()
             retry_count = 0
-            max_retries = 2
+            max_retries = EXTERNAL_RETRY_ATTEMPTS
 
             # Check for available proxies
             all_proxies = session.query(Proxy).all()
@@ -888,11 +941,22 @@ class Scraper:
                     # Create FRESH browser for each book (different fingerprint)
                     browser = create_fresh_browser(proxy)
                     if not browser or not browser.process_id:
-                        print(
-                            "🚨 CRITICAL: Cannot create browser instance.", flush=True
+                        error = NetworkError(
+                            "Browser process could not be started",
+                            operation="government_site.create_browser",
+                            context={"book": f"{code}/{number}/{digit}"},
                         )
+                        log_error(logger, error)
                         self._increment_failure_count(proxy, session)
                         self.release_proxy(proxy, session)
+                        time.sleep(
+                            backoff_delay(
+                                retry_count,
+                                base=EXTERNAL_RETRY_BASE,
+                                maximum=EXTERNAL_RETRY_MAX,
+                                jitter=0.25,
+                            )
+                        )
                         continue
 
                     # Scrape using the browser directly (no tabs - simpler)
@@ -900,12 +964,23 @@ class Scraper:
 
                     # Handle results
                     if result["success"] == "2":  # Rejected/Blocked
-                        print(
-                            f"🚫 BLOCKED: Server rejected request for {code}/{number}/{digit}",
-                            flush=True,
+                        error = CaptchaError(
+                            "Government site rejected the request",
+                            operation="government_site.scrape_book",
+                            context={"book": f"{code}/{number}/{digit}"},
                         )
+                        GOVERNMENT_SITE_CIRCUIT.record_success()
+                        log_error(logger, error)
                         self._increment_failure_count(proxy, session)
                         self.release_proxy(proxy, session)
+                        time.sleep(
+                            backoff_delay(
+                                retry_count,
+                                base=EXTERNAL_RETRY_BASE,
+                                maximum=EXTERNAL_RETRY_MAX,
+                                jitter=0.25,
+                            )
+                        )
                         continue
 
                     elif result["success"] == "0" and result.get("code") == "not-found":
@@ -913,6 +988,7 @@ class Scraper:
                             f"📋 NOT FOUND: Book {code}/{number}/{digit} does not exist",
                             flush=True,
                         )
+                        GOVERNMENT_SITE_CIRCUIT.record_success()
                         self.release_proxy(proxy, session)
                         return result
 
@@ -921,18 +997,41 @@ class Scraper:
                             f"✅ SUCCESS: Book {code}/{number}/{digit} downloaded",
                             flush=True,
                         )
+                        GOVERNMENT_SITE_CIRCUIT.record_success()
                         self.release_proxy(proxy, session)
                         return result
 
                     elif result.get("code") == "incapsula-block":
-                        print(
-                            f"🚫 INCAPSULA BLOCK: {code}/{number}/{digit} - retrying",
-                            flush=True,
+                        error = CaptchaError(
+                            "Government site presented an Incapsula challenge",
+                            operation="government_site.scrape_book",
+                            context={"book": f"{code}/{number}/{digit}"},
                         )
+                        GOVERNMENT_SITE_CIRCUIT.record_success()
+                        log_error(logger, error)
                         self._increment_failure_count(proxy, session)
                         self.release_proxy(proxy, session)
-                        # Krótki cooldown — residential auto-IP zmienia IP na każdy request
-                        time.sleep(random.uniform(2, 4))
+                        time.sleep(
+                            backoff_delay(
+                                retry_count,
+                                base=EXTERNAL_RETRY_BASE,
+                                maximum=EXTERNAL_RETRY_MAX,
+                                jitter=0.25,
+                            )
+                        )
+                        continue
+
+                    elif result.get("code") == "circuit-open":
+                        # An open circuit is a site-wide pause, not a failed book.
+                        # Do not consume this book's retry budget while waiting for
+                        # the single half-open recovery probe.
+                        retry_count = max(0, retry_count - 1)
+                        retry_after = max(0.1, float(result.get("retry_after", 1)))
+                        print(
+                            f"Government-site circuit open; retrying after {retry_after:.1f}s",
+                            flush=True,
+                        )
+                        time.sleep(retry_after)
                         continue
 
                     # Other failure
@@ -943,13 +1042,55 @@ class Scraper:
                     )
                     self._increment_failure_count(proxy, session)
                     self.release_proxy(proxy, session)
+                    error_type = (
+                        DataError
+                        if failure_code == "structure-changed"
+                        else NetworkError
+                    )
+                    error = error_type(
+                        f"Government site returned failure code '{failure_code}'",
+                        operation="government_site.scrape_book",
+                        context={"book": f"{code}/{number}/{digit}", "result_code": failure_code},
+                    )
+                    if isinstance(error, NetworkError):
+                        GOVERNMENT_SITE_CIRCUIT.record_failure()
+                    else:
+                        GOVERNMENT_SITE_CIRCUIT.record_success()
+                    log_error(logger, error)
+                    if error.retryable:
+                        time.sleep(
+                            backoff_delay(
+                                retry_count,
+                                base=EXTERNAL_RETRY_BASE,
+                                maximum=EXTERNAL_RETRY_MAX,
+                                jitter=0.25,
+                            )
+                        )
+                    else:
+                        return result
 
                 except Exception as e:
-                    print(f"🚨 EXCEPTION in scrape_book: {str(e)}", flush=True)
-                    traceback.print_exc()
+                    error = NetworkError(
+                        "Unexpected failure while calling the government site",
+                        operation="government_site.scrape_book",
+                        context={
+                            "book": f"{code}/{number}/{digit}",
+                            "cause": type(e).__name__,
+                        },
+                    )
+                    GOVERNMENT_SITE_CIRCUIT.record_failure()
+                    log_error(logger, error, exc_info=True)
                     if proxy:
                         self._increment_failure_count(proxy, session)
                         self.release_proxy(proxy, session)
+                    time.sleep(
+                        backoff_delay(
+                            retry_count,
+                            base=EXTERNAL_RETRY_BASE,
+                            maximum=EXTERNAL_RETRY_MAX,
+                            jitter=0.25,
+                        )
+                    )
 
                 finally:
                     # Always close the browser completely
@@ -1066,9 +1207,35 @@ class Scraper:
         try:
             import requests
 
-            response = requests.get(self.pre_search_url, timeout=10)
+            def request_health():
+                try:
+                    response = requests.get(self.pre_search_url, timeout=10)
+                    if response.status_code >= 500:
+                        raise NetworkError(
+                            f"Government site returned HTTP {response.status_code}",
+                            operation="government_site.health",
+                            context={"status_code": response.status_code},
+                        )
+                    return response
+                except requests.RequestException as error:
+                    raise NetworkError(
+                        "Government site health request failed",
+                        operation="government_site.health",
+                    ) from error
+
+            response = retry_external_call(
+                request_health,
+                operation="government_site.health",
+                attempts=EXTERNAL_RETRY_ATTEMPTS,
+                base_delay=EXTERNAL_RETRY_BASE,
+                max_delay=EXTERNAL_RETRY_MAX,
+                jitter=0.25,
+                circuit_breaker=GOVERNMENT_SITE_CIRCUIT,
+                logger=logger,
+            )
             if response.status_code == 200:
                 if "przerwa serwisowa" in response.text:
+                    GOVERNMENT_SITE_CIRCUIT.trip()
                     return {
                         "status": "maintenance",
                         "message": "Site is in maintenance mode",
@@ -1078,5 +1245,13 @@ class Scraper:
                 "status": "error",
                 "message": f"Site returned status {response.status_code}",
             }
-        except Exception as e:
-            return {"status": "error", "message": str(e)}
+        except CircuitOpenError as error:
+            log_error(logger, error)
+            return {
+                "status": "circuit-open",
+                "message": str(error),
+                "retry_after": error.retry_after,
+            }
+        except NetworkError as error:
+            log_error(logger, error)
+            return {"status": "error", "message": str(error)}

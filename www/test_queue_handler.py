@@ -1,6 +1,7 @@
 import unittest
 from unittest.mock import Mock
 
+from scraping_functions.errors import QueueError
 from www.queue_handler import ReliableQueueHandler
 
 
@@ -54,7 +55,11 @@ class ReliableQueueHandlerTests(unittest.TestCase):
         self.assertEqual(processor.call_count, 4)
         self.assertEqual([call.args[0] for call in self.sleep.call_args_list], [1, 2, 4])
         self.acknowledge.assert_not_called()
-        self.dead_letter.assert_called_once_with(message, error)
+        self.dead_letter.assert_called_once()
+        dead_letter_message, dead_letter_error = self.dead_letter.call_args.args
+        self.assertIs(dead_letter_message, message)
+        self.assertIsInstance(dead_letter_error, QueueError)
+        self.assertEqual(dead_letter_error.context["cause"], "RuntimeError")
 
     def test_dead_letter_failure_does_not_escape(self):
         handler = self.make_handler(Mock(side_effect=RuntimeError("broken")))

@@ -1,4 +1,5 @@
 import concurrent.futures
+import logging
 import os
 import queue
 import random
@@ -22,8 +23,10 @@ if parent_dir not in sys.path:
 from helper import get_control_digit, get_formatted_book_number
 from kwparser import parse_directory
 from scraping_functions.scraper import Scraper
+from scraping_functions.errors import DataError, NetworkError, log_error
 
 load_dotenv()
+logger = logging.getLogger(__name__)
 
 # Get environment variables - now using DATABASE_URL instead of MONGO_URI
 DATABASE_URL = os.getenv(
@@ -76,6 +79,32 @@ def save_page_source(department_code, book_number, control_digit, section, page_
     cleaned_html = page_source
     with open(filename, "w", encoding="utf-8") as file:
         file.write(cleaned_html)
+
+
+def save_debug_html(book_id, page_source):
+    """Best-effort diagnostic capture that never hides the original site error."""
+    safe_book_id = "".join(
+        character for character in str(book_id) if character.isalnum() or character in "-_"
+    )
+    try:
+        debug_directory = os.path.join(OUTPUTS_DIRNAME, "debug")
+        os.makedirs(debug_directory, exist_ok=True)
+        with open(
+            os.path.join(debug_directory, f"{safe_book_id}.html"),
+            "w",
+            encoding="utf-8",
+        ) as debug_file:
+            debug_file.write(page_source)
+    except OSError as error:
+        log_error(
+            logger,
+            DataError(
+                "Debug response HTML could not be saved",
+                operation="scraper.save_debug_html",
+                context={"book": safe_book_id, "cause": type(error).__name__},
+            ),
+            exc_info=True,
+        )
 
 
 def setup_scraper():
@@ -132,16 +161,27 @@ def setup_scraper():
         return scraper
 
     except ConnectionError as e:
-        print(f"Error: {e}")
-        print("Cannot continue without proper connections. Exiting...")
-        sys.exit(1)
+        error = NetworkError(
+            "Scraper setup could not connect to an external service",
+            operation="scraper.setup",
+            context={"cause": type(e).__name__},
+        )
+        log_error(logger, error, exc_info=True)
+        raise error from e
     except Exception as e:
-        print(f"Unexpected error setting up scraper: {e}")
-        print("Cannot continue. Exiting...")
-        sys.exit(1)
+        error = DataError(
+            "Scraper setup failed while loading configuration or proxy data",
+            operation="scraper.setup",
+            context={"cause": type(e).__name__},
+        )
+        log_error(logger, error, exc_info=True)
+        raise error from e
 
 
-@tenacity.retry(wait=tenacity.wait_fixed(5), stop=tenacity.stop_after_attempt(3))
+@tenacity.retry(
+    wait=tenacity.wait_exponential(multiplier=1, min=1, max=8),
+    stop=tenacity.stop_after_attempt(3),
+)
 def run_scraper(
     scraper, department_code: str, ekw_number, start_from: int = 0, end_at: int = 999999
 ):
@@ -226,10 +266,16 @@ def run_scraper(
                 return True
 
             except Exception as e:
-                # This matches the original error handler for section processing
-                print(
-                    f"Error clicking or processing sections for book number {ekw_number}. Skipping..."
+                error = DataError(
+                    "Scraped book sections could not be saved",
+                    operation="scraper.save_sections",
+                    context={
+                        "department_code": department_code,
+                        "book_number": str(ekw_number),
+                        "cause": type(e).__name__,
+                    },
                 )
+                log_error(logger, error, exc_info=True)
                 book_result = "failure"  # Set result for timing stats
                 # Original would have continued to next book in this case
                 return True

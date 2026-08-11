@@ -3,6 +3,8 @@
 import logging
 import time
 
+from scraping_functions.errors import ApplicationError, QueueError, log_error
+
 
 class ReliableQueueHandler:
     """Process one message at a time without allowing failures to stop the queue."""
@@ -53,13 +55,17 @@ class ReliableQueueHandler:
                 self.logger.info("Message %s processed and acknowledged", message_id)
                 return True
             except Exception as error:
-                last_error = error
-                self.logger.exception(
-                    "Message %s failed on attempt %s/%s",
-                    message_id,
-                    attempt,
-                    total_attempts,
+                last_error = error if isinstance(error, ApplicationError) else QueueError(
+                    "Queue message processing failed",
+                    operation="queue.process_message",
+                    context={
+                        "message_id": str(message_id),
+                        "attempt": attempt,
+                        "total_attempts": total_attempts,
+                        "cause": type(error).__name__,
+                    },
                 )
+                log_error(self.logger, last_error, exc_info=True)
 
                 if attempt <= len(self.retry_delays):
                     delay = self.retry_delays[attempt - 1]
@@ -75,9 +81,18 @@ class ReliableQueueHandler:
                 message_id,
                 total_attempts,
             )
-        except Exception:
+        except Exception as error:
             # Dead-letter storage errors are logged but never crash the queue loop.
-            self.logger.exception(
-                "Could not move message %s to the dead-letter queue", message_id
+            log_error(
+                self.logger,
+                QueueError(
+                    "Could not move message to the dead-letter queue",
+                    operation="queue.dead_letter",
+                    context={
+                        "message_id": str(message_id),
+                        "cause": type(error).__name__,
+                    },
+                ),
+                exc_info=True,
             )
         return False
