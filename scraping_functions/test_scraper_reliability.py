@@ -59,9 +59,12 @@ class SessionManagerTests(unittest.TestCase):
         second = self.manager.acquire(self.proxy)
         self.assertIs(first, second)
         self.factory.assert_called_once()
-        self.browser.set.cookies.assert_called_once()
+        self.browser.set.cookies.assert_called_once_with(
+            [{"name": "old", "value": "1"}]
+        )
 
         self.manager.checkpoint(self.proxy)
+        self.browser.cookies.assert_called_once_with(all_domains=True, all_info=True)
         self.assertTrue(self.proxy.cookies_valid)
         self.assertEqual(self.proxy.cookies[0]["name"], "session")
         self.assertNotIn("ignored", self.proxy.cookies[0])

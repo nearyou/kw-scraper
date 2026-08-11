@@ -6,6 +6,18 @@ from scraping_functions.resilience import CircuitBreaker, backoff_delay, retry_e
 
 
 class CircuitBreakerTests(unittest.TestCase):
+    def test_trips_exactly_at_the_failure_threshold(self):
+        breaker = CircuitBreaker("government-site", failure_threshold=3)
+
+        breaker.record_failure()
+        breaker.record_failure()
+        self.assertEqual(breaker.state, CircuitBreaker.CLOSED)
+
+        breaker.record_failure()
+        self.assertEqual(breaker.state, CircuitBreaker.OPEN)
+        with self.assertRaises(CircuitOpenError):
+            breaker.before_call("search")
+
     def test_opens_then_allows_one_probe_after_timeout(self):
         now = [10.0]
         breaker = CircuitBreaker(

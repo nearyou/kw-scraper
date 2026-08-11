@@ -124,6 +124,30 @@ class HealthCheckTests(unittest.TestCase):
         self.assertEqual(status_code, 503)
         self.assertEqual(report["checks"]["queue"]["status"], "unavailable")
 
+    def test_stale_last_success_returns_503(self):
+        scraper = evaluate_scraper(
+            {
+                "successful_runs": 1,
+                "failed_runs": 0,
+                "observed_runs": 1,
+                "error_rate": 0.0,
+                "last_successful_scrape": self.now - timedelta(hours=25),
+                "window_seconds": 3600,
+            },
+            now=self.now,
+            max_age_seconds=86400,
+        )
+        report, status_code = build_health_report(
+            {"status": "accessible"},
+            {"status": "working"},
+            scraper,
+            now=self.now,
+        )
+
+        self.assertEqual(status_code, 503)
+        self.assertEqual(report["checks"]["scraper"]["status"], "unhealthy")
+        self.assertIn("last_success_is_stale", scraper["problems"])
+
     def test_no_scrape_history_is_reported_without_failing_dependencies(self):
         metrics = {
             "successful_runs": 0,
