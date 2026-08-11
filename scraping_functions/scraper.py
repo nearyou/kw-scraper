@@ -31,6 +31,7 @@ from scraping_functions.errors import (
     log_error,
 )
 from scraping_functions.resilience import CircuitBreaker, backoff_delay, retry_external_call
+from scraping_functions.session_manager import BrowserSessionManager, DEFAULT_HEADERS
 
 # Load environment variables
 load_dotenv()
@@ -69,6 +70,12 @@ GOVERNMENT_SITE_CIRCUIT = CircuitBreaker(
 EXTERNAL_RETRY_ATTEMPTS = int(os.getenv("EXTERNAL_RETRY_ATTEMPTS", "3"))
 EXTERNAL_RETRY_BASE = float(os.getenv("CB_BASE", "1"))
 EXTERNAL_RETRY_MAX = float(os.getenv("CB_MAX", "30"))
+ELEMENT_TIMEOUT = float(os.getenv("ELEMENT_TIMEOUT", "10"))
+PAGE_LOAD_TIMEOUT = float(os.getenv("PAGE_LOAD_TIMEOUT", "45"))
+SCRIPT_TIMEOUT = float(os.getenv("SCRIPT_TIMEOUT", "20"))
+RESULT_TIMEOUT = float(os.getenv("RESULT_TIMEOUT", "15"))
+SESSION_MAX_REQUESTS = int(os.getenv("SESSION_MAX_REQUESTS", "20"))
+SESSION_MAX_AGE_SECONDS = int(os.getenv("SESSION_MAX_AGE_SECONDS", "900"))
 
 # Anti-detection delays — zredukowane: residential proxy z auto IP zmienia IP na każdy request,
 # więc agresywne opóźnienia anty-detekcyjne są zbędne.
@@ -178,7 +185,7 @@ def detect_incapsula(content):
     return False
 
 
-def create_fresh_browser(proxy=None):
+def create_fresh_browser(proxy=None, user_agent=None, headers=None):
     """
     Create a fresh browser instance for each scraping session.
     This ensures unique fingerprint per session and proper proxy routing.
@@ -191,8 +198,9 @@ def create_fresh_browser(proxy=None):
     co.set_argument("--no-sandbox")
     co.set_argument("--disable-dev-shm-usage")
 
-    # Enhanced Stealth - Randomize User-Agent for EACH browser
-    user_agent = random.choice(USER_AGENTS)
+    # The session manager keeps this identity stable for several books, then
+    # deliberately rotates it when the bounded browser session is replaced.
+    user_agent = user_agent or random.choice(USER_AGENTS)
     co.set_user_agent(user_agent)
     co.set_argument("--lang=pl-PL,pl,en-US,en")
 
@@ -215,7 +223,11 @@ def create_fresh_browser(proxy=None):
     co.mute(True)
 
     # Timeouts
-    co.set_timeouts(page_load=45, script=20)
+    co.set_timeouts(
+        base=ELEMENT_TIMEOUT,
+        page_load=PAGE_LOAD_TIMEOUT,
+        script=SCRIPT_TIMEOUT,
+    )
 
     # Handle proxy configuration
     if proxy and not proxy.is_direct and proxy.host:
@@ -232,7 +244,8 @@ def create_fresh_browser(proxy=None):
             )
             co.set_proxy(proxy_str)
 
-    browser = ChromiumPage(co)
+    browser = ChromiumPage(co, timeout=PAGE_LOAD_TIMEOUT)
+    browser.set.headers(headers or DEFAULT_HEADERS)
 
     # ===== INJECT STEALTH JS VIA CDP — runs BEFORE every page load =====
     try:
@@ -348,7 +361,10 @@ def process_tab_scraping(tab, code, number, digit, view_type="current"):
         # 1. Navigate to menu
         def load_menu():
             try:
-                tab.get("https://ekw.ms.gov.pl/eukw_ogol/menu.do", timeout=30)
+                tab.get(
+                    "https://ekw.ms.gov.pl/eukw_ogol/menu.do",
+                    timeout=PAGE_LOAD_TIMEOUT,
+                )
             except Exception as error:
                 raise NetworkError(
                     "Government site menu could not be loaded",
@@ -500,7 +516,7 @@ def process_tab_scraping(tab, code, number, digit, view_type="current"):
         # 4. Wait for results
         found = False
         start = time.time()
-        max_wait = 15  # Increased timeout
+        max_wait = RESULT_TIMEOUT
 
         while time.time() - start < max_wait:
             # Handle page refresh errors gracefully
@@ -674,7 +690,7 @@ def process_tab_scraping(tab, code, number, digit, view_type="current"):
                     tab.run_js(js_submit)
 
                     # Wait for page to load (load_start już czeka — sleep był zbędny)
-                    tab.wait.load_start(timeout=10)
+                    tab.wait.load_start(timeout=PAGE_LOAD_TIMEOUT)
 
                     # Get section HTML
                     section_content = tab.html
@@ -762,6 +778,13 @@ class Scraper:
             print(f"Connecting to database at {db_url}...")
             self.engine = create_engine(db_url)
             self.Session = scoped_session(sessionmaker(bind=self.engine))
+            self.session_manager = BrowserSessionManager(
+                create_fresh_browser,
+                USER_AGENTS,
+                max_requests=SESSION_MAX_REQUESTS,
+                max_age_seconds=SESSION_MAX_AGE_SECONDS,
+                logger=logger,
+            )
             print("Database connection successful")
 
             # URLs used for scraping (kept for reference)
@@ -777,6 +800,7 @@ class Scraper:
             print(f"Scraper initialization failed: {self.initialization_error}")
             self.engine = None
             self.Session = None
+            self.session_manager = None
 
     # ------- Proxy management methods -------
 
@@ -887,7 +911,8 @@ class Scraper:
     def scrape_book(self, code, number, digit):
         """
         High-level method to scrape a book using DrissionPage
-        Creates a FRESH browser for each book to avoid fingerprint detection.
+        Reuses a bounded browser session so cookies and headers remain stable,
+        then rotates the session periodically or after a block/network failure.
 
         Args:
             code: Department code
@@ -923,6 +948,7 @@ class Scraper:
                     continue
 
                 retry_count += 1
+                invalidate_session = False
 
                 # Anti-detection: staggered delay between books
                 delay = random.uniform(BOOK_DELAY_MIN, BOOK_DELAY_MAX)
@@ -938,8 +964,9 @@ class Scraper:
                         flush=True,
                     )
 
-                    # Create FRESH browser for each book (different fingerprint)
-                    browser = create_fresh_browser(proxy)
+                    # Reuse cookies, headers, and browser identity for a bounded
+                    # session. Rotation occurs by age/request count or on blocking.
+                    browser = self.session_manager.acquire(proxy)
                     if not browser or not browser.process_id:
                         error = NetworkError(
                             "Browser process could not be started",
@@ -964,6 +991,7 @@ class Scraper:
 
                     # Handle results
                     if result["success"] == "2":  # Rejected/Blocked
+                        invalidate_session = True
                         error = CaptchaError(
                             "Government site rejected the request",
                             operation="government_site.scrape_book",
@@ -1002,6 +1030,7 @@ class Scraper:
                         return result
 
                     elif result.get("code") == "incapsula-block":
+                        invalidate_session = True
                         error = CaptchaError(
                             "Government site presented an Incapsula challenge",
                             operation="government_site.scrape_book",
@@ -1053,6 +1082,7 @@ class Scraper:
                         context={"book": f"{code}/{number}/{digit}", "result_code": failure_code},
                     )
                     if isinstance(error, NetworkError):
+                        invalidate_session = True
                         GOVERNMENT_SITE_CIRCUIT.record_failure()
                     else:
                         GOVERNMENT_SITE_CIRCUIT.record_success()
@@ -1070,6 +1100,7 @@ class Scraper:
                         return result
 
                 except Exception as e:
+                    invalidate_session = True
                     error = NetworkError(
                         "Unexpected failure while calling the government site",
                         operation="government_site.scrape_book",
@@ -1093,13 +1124,13 @@ class Scraper:
                     )
 
                 finally:
-                    # Always close the browser completely
+                    # Persist cookies after every book. Broken or challenged
+                    # sessions are discarded so poisoned state is never reused.
                     if browser:
-                        try:
-                            browser.quit()
-                            print("DEBUG: Browser closed completely.", flush=True)
-                        except Exception as e:
-                            print(f"DEBUG: Error closing browser: {e}", flush=True)
+                        if invalidate_session:
+                            self.session_manager.invalidate(proxy)
+                        else:
+                            self.session_manager.checkpoint(proxy)
                         browser = None
 
                     if proxy:
@@ -1117,11 +1148,6 @@ class Scraper:
             return {"success": "0", "code": "timeout"}
 
         finally:
-            if browser:
-                try:
-                    browser.quit()
-                except:
-                    pass
             if proxy:
                 self.release_proxy(proxy, session)
             try:
@@ -1194,9 +1220,9 @@ class Scraper:
                 session.close()
 
     def close(self):
-        """Close database session (browser is now closed per-book)"""
-        # No singleton browser to close - each book creates and closes its own
-        pass
+        """Close the reusable browser session owned by this scraper."""
+        if self.session_manager:
+            self.session_manager.close()
 
     def __del__(self):
         """Clean up resources when object is destroyed"""
@@ -1209,7 +1235,10 @@ class Scraper:
 
             def request_health():
                 try:
-                    response = requests.get(self.pre_search_url, timeout=10)
+                    response = requests.get(
+                        self.pre_search_url,
+                        timeout=(min(5, PAGE_LOAD_TIMEOUT), PAGE_LOAD_TIMEOUT),
+                    )
                     if response.status_code >= 500:
                         raise NetworkError(
                             f"Government site returned HTTP {response.status_code}",
