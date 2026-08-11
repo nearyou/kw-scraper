@@ -35,6 +35,7 @@ from scraping_functions.errors import (
 from scraping_functions.resilience import CircuitBreaker, backoff_delay, retry_external_call
 from scraping_functions.session_manager import BrowserSessionManager, DEFAULT_HEADERS
 from scraping_functions.proxy_config import load_proxy_settings
+from scraping_functions.proxy_bridge import AuthenticatedProxyBridge
 
 # Load environment variables
 load_dotenv()
@@ -233,17 +234,28 @@ def create_fresh_browser(proxy=None, user_agent=None, headers=None):
         script=SCRIPT_TIMEOUT,
     )
 
-    # Handle proxy configuration
+    # Chromium does not reliably support authenticated proxy URLs, and current
+    # headless Chromium ignores authentication extensions. Route it through a
+    # local unauthenticated bridge that adds credentials only when connecting
+    # to the configured upstream proxy.
+    proxy_bridge = None
     if proxy and not proxy.is_direct and proxy.host:
         try:
-            extension_path = create_proxy_auth_extension(
-                proxy.host,
-                proxy.port,
-                proxy.username,
-                proxy.password,
-                getattr(proxy, "scheme", os.getenv("PROXY_SCHEME", "http")),
+            proxy_scheme = getattr(
+                proxy, "scheme", os.getenv("PROXY_SCHEME", "http")
             )
-            co.add_extension(extension_path)
+            if proxy.username or proxy.password:
+                proxy_bridge = AuthenticatedProxyBridge(
+                    proxy.host,
+                    proxy.port,
+                    proxy.username or "",
+                    proxy.password or "",
+                    scheme=proxy_scheme,
+                    connect_timeout=PAGE_LOAD_TIMEOUT,
+                ).start()
+                co.set_proxy(proxy_bridge.url)
+            else:
+                co.set_proxy(f"{proxy_scheme}://{proxy.host}:{proxy.port}")
             logger.info(
                 "authenticated_proxy_configured",
                 extra={"context": {"host": proxy.host, "port": proxy.port}},
@@ -266,7 +278,13 @@ def create_fresh_browser(proxy=None, user_agent=None, headers=None):
                 context={"host": proxy.host, "port": proxy.port},
             ) from pe
 
-    browser = ChromiumPage(co, timeout=PAGE_LOAD_TIMEOUT)
+    try:
+        browser = ChromiumPage(co, timeout=PAGE_LOAD_TIMEOUT)
+    except Exception:
+        if proxy_bridge is not None:
+            proxy_bridge.close()
+        raise
+    browser._authenticated_proxy_bridge = proxy_bridge
     browser.set.headers(headers or DEFAULT_HEADERS)
 
     # ===== INJECT STEALTH JS VIA CDP — runs BEFORE every page load =====

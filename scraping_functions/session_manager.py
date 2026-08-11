@@ -128,7 +128,11 @@ class BrowserSessionManager:
         self.created_at = None
         self.requests_used = 0
         if browser:
+            bridge = getattr(browser, "_authenticated_proxy_bridge", None)
             try:
                 browser.quit(timeout=5, force=True)
             except Exception:
                 self.logger.warning("browser_session_close_failed", exc_info=True)
+            finally:
+                if bridge is not None:
+                    bridge.close()
