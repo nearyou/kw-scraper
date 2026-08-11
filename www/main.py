@@ -1367,7 +1367,10 @@ def start_celery_workers():
         
         # Command to start Celery workers. Read desired concurrency/pool from env.
         CELERY_CONCURRENCY = os.getenv('CELERY_CONCURRENCY', '4')
-        CELERY_POOL = os.getenv('CELERY_POOL', 'prefork')
+        CELERY_POOL = os.getenv(
+            'CELERY_POOL',
+            'threads' if os.name == 'nt' else 'prefork',
+        )
         CELERY_PREFETCH = os.getenv('CELERY_PREFETCH_MULTIPLIER', None)
         CELERY_LOG_LEVEL = os.getenv('CELERY_LOG_LEVEL', 'ERROR')
 

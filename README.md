@@ -64,7 +64,7 @@ Start the queue manager / scrapers (RabbitMQ and PostgreSQL must be up):
 
 ```bash
 # Celery worker (runs `queue_manager_task` which processes TaskQueue entries)
-celery -A www.main.celery worker --loglevel=error --concurrency=4
+celery -A www.main.celery worker --pool=threads --loglevel=error --concurrency=4
 
 # Web panel (dev)
 flask --app www.main run --port 8000
