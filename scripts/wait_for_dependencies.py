@@ -3,9 +3,16 @@
 import os
 import sys
 import time
+from pathlib import Path
 
 import psycopg2
 from kombu import Connection
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from logging_config import configure_logging  # noqa: E402
+
+
+logger = configure_logging(capture_streams=True).getChild("startup")
 
 
 def check_database(database_url):
@@ -42,16 +49,30 @@ def wait_for_dependencies():
             try:
                 check()
             except Exception as error:
-                failures.append(f"{name}: {error}")
+                failures.append(
+                    {
+                        "dependency": name,
+                        "error_type": type(error).__name__,
+                        "message": str(error),
+                    }
+                )
 
         if not failures:
-            print("Startup dependencies are ready", flush=True)
+            logger.info(
+                "startup_dependencies_ready",
+                extra={"context": {"dependency_count": len(checks)}},
+            )
             return True
 
-        print(
-            f"Dependencies unavailable (attempt {attempt}/{max_attempts}): "
-            + "; ".join(failures),
-            flush=True,
+        logger.warning(
+            "startup_dependencies_unavailable",
+            extra={
+                "context": {
+                    "attempt": attempt,
+                    "max_attempts": max_attempts,
+                    "failures": failures,
+                }
+            },
         )
         if attempt < max_attempts:
             # Short capped backoff avoids both startup storms and long shutdown waits.

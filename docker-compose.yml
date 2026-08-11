@@ -40,6 +40,11 @@ services:
       CB_BASE: "5"
       CB_MAX: "60"
       DEPENDENCY_MAX_ATTEMPTS: "30"
+      SERVICE_NAME: celery
+      LOG_LEVEL: INFO
+      LOG_FILE: /app/logs/celery.log
+    volumes:
+      - app-logs:/app/logs
     healthcheck:
       # Use the broker URL directly so the probe does not import the app and
       # accidentally run application startup hooks on every health check.
@@ -69,6 +74,11 @@ services:
       CELERY_BROKER_URL: amqp://guest:guest@rabbitmq:5672//
       FLASK_ENV: production
       DEPENDENCY_MAX_ATTEMPTS: "30"
+      SERVICE_NAME: web
+      LOG_LEVEL: INFO
+      LOG_FILE: /app/logs/web.log
+    volumes:
+      - app-logs:/app/logs
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://127.0.0.1:5000/health"]
       interval: 30s
@@ -120,6 +130,11 @@ services:
       CB_BASE: "5"
       CB_MAX: "60"
       DEPENDENCY_MAX_ATTEMPTS: "30"
+      SERVICE_NAME: scraper
+      LOG_LEVEL: INFO
+      LOG_FILE: /app/logs/scraper.log
+    volumes:
+      - app-logs:/app/logs
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -134,3 +149,4 @@ services:
 
 volumes:
   rabbitmq-data:
+  app-logs:

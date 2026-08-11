@@ -775,7 +775,10 @@ class Scraper:
                     "Database URL not provided or found in environment variables."
                 )
 
-            print(f"Connecting to database at {db_url}...")
+            logger.info(
+                "database_connection_started",
+                extra={"context": {"configured": True}},
+            )
             self.engine = create_engine(db_url)
             self.Session = scoped_session(sessionmaker(bind=self.engine))
             self.session_manager = BrowserSessionManager(

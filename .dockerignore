@@ -6,6 +6,7 @@ venv
 __pycache__
 *.py[cod]
 *.log
+logs
 *.sqlite*
 migrations/__pycache__
 www/__pycache__

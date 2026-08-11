@@ -1,4 +1,5 @@
 import os
+import logging
 import time
 import subprocess
 import psutil
@@ -7,7 +8,7 @@ import json
 import tempfile
 import gc  # Import garbage collector module
 import threading
-from flask import Flask, request, render_template, redirect, url_for, session, send_from_directory, send_file, make_response, jsonify, flash
+from flask import Flask, g, request, render_template, redirect, url_for, session, send_from_directory, send_file, make_response, jsonify, flash
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from flask_migrate import Migrate
 from functools import wraps
@@ -20,6 +21,18 @@ parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if parent_dir not in sys.path:
     sys.path.append(parent_dir)
 
+from dotenv import load_dotenv
+from logging_config import (
+    configure_logging,
+    get_correlation_id,
+    reset_correlation_id,
+    set_correlation_id,
+)
+
+load_dotenv()
+configure_logging(capture_streams=True)
+logger = logging.getLogger(__name__)
+
 try:
     # Try direct import first (for Celery worker)
     from www.models import db, Informacje, Wlasciciele, Notatki, Status, User, ScrapingProgress, TaskStatus, TaskQueue, UserPrefixPermission, get_user_by_login, get_user, Egzekucje, Hipoteki, Spadki, Dziedziczenia, Darowizny
@@ -29,8 +42,8 @@ except ImportError:
 
 from celery import Celery, chain
 from celery.backends.base import DisabledBackend
+from celery.signals import before_task_publish
 from celery.result import AsyncResult, current_app
-from dotenv import load_dotenv
 from sqlalchemy import and_, not_, exists
 from celery.exceptions import MaxRetriesExceededError
 
@@ -40,8 +53,6 @@ from unidecode import unidecode
 
 import sentry_sdk
 from www.queue_handler import ReliableQueueHandler
-
-load_dotenv()
 
 # Import the cleaned, refactored kwscraper functions
 from kwscraper import DownloadOutcome, run_scraper, setup_scraper, download_worker, processing_done_event, cleanup_local_folder
@@ -71,8 +82,50 @@ sentry_sdk.init(
 
 app = Flask(__name__)
 
+
+@app.before_request
+def begin_request_logging():
+    g.correlation_token = set_correlation_id(request.headers.get('X-Correlation-ID'))
+    g.request_started_at = time.monotonic()
+    logger.info(
+        "http_request_started",
+        extra={
+            "context": {
+                "method": request.method,
+                "path": request.path,
+                "remote_address": request.remote_addr,
+            }
+        },
+    )
+
+
+@app.after_request
+def complete_request_logging(response):
+    started_at = getattr(g, 'request_started_at', None)
+    duration_ms = round((time.monotonic() - started_at) * 1000, 2) if started_at else 0
+    response.headers['X-Correlation-ID'] = get_correlation_id()
+    logger.info(
+        "http_request_completed",
+        extra={
+            "context": {
+                "method": request.method,
+                "path": request.path,
+                "status_code": response.status_code,
+                "duration_ms": duration_ms,
+            }
+        },
+    )
+    return response
+
+
+@app.teardown_request
+def clear_request_logging(_error=None):
+    token = getattr(g, 'correlation_token', None)
+    if token is not None:
+        reset_correlation_id(token)
+
 DATABASE_URL = os.getenv('DATABASE_URL')
-print(f"DEBUG - Actual DATABASE_URL being used: {DATABASE_URL}")
+logger.info("database_configuration_loaded", extra={"context": {"configured": bool(DATABASE_URL)}})
 app.config['SQLALCHEMY_DATABASE_URI'] = f'{DATABASE_URL}?sslmode=disable'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
@@ -118,20 +171,66 @@ def make_celery(app):
         task_reject_on_worker_lost=True,  # Requeue tasks if worker is lost
         task_acks_on_failure_or_timeout=False,  # Don't ack failed tasks
         broker_connection_max_retries=10,  # Retry connecting to broker up to 10 times
-        broker_connection_timeout=10  # 10 second connection timeout
+        broker_connection_timeout=10,  # 10 second connection timeout
+        worker_hijack_root_logger=False,
+        worker_redirect_stdouts=False,
     )
 
     # Task class with Flask app context
     class ContextTask(celery.Task):
         def __call__(self, *args, **kwargs):
-            with app.app_context():
-                return self.run(*args, **kwargs)
+            headers = getattr(self.request, 'headers', None) or {}
+            correlation_id = headers.get('correlation_id') or self.request.id
+            token = set_correlation_id(correlation_id)
+            logger.info(
+                "celery_task_started",
+                extra={
+                    "context": {
+                        "task_id": self.request.id,
+                        "task_name": self.name,
+                    }
+                },
+            )
+            try:
+                with app.app_context():
+                    result = self.run(*args, **kwargs)
+            except Exception:
+                logger.exception(
+                    "celery_task_failed",
+                    extra={
+                        "context": {
+                            "task_id": self.request.id,
+                            "task_name": self.name,
+                        }
+                    },
+                )
+                raise
+            else:
+                logger.info(
+                    "celery_task_finished",
+                    extra={
+                        "context": {
+                            "task_id": self.request.id,
+                            "task_name": self.name,
+                        }
+                    },
+                )
+                return result
+            finally:
+                reset_correlation_id(token)
 
     celery.Task = ContextTask
     return celery
 
 # Create Celery instance after Flask app initialization
 celery = make_celery(app)
+
+
+@before_task_publish.connect
+def propagate_correlation_id(headers=None, **_kwargs):
+    """Carry the originating HTTP/task correlation into the next Celery task."""
+    if headers is not None and get_correlation_id() != '-':
+        headers['correlation_id'] = get_correlation_id()
 
 # ---------------------------------------------------------------------------
 # Cached Celery control RPC (inspect) — prevent 504s from blocking every HTTP

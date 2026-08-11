@@ -20,6 +20,12 @@ parent_dir = os.path.dirname(os.path.abspath(__file__))
 if parent_dir not in sys.path:
     sys.path.append(parent_dir)
 
+load_dotenv()
+from logging_config import configure_logging, correlation_context
+
+if __name__ == "__main__":
+    configure_logging(service="scraper", capture_streams=True)
+
 # Import after setting up the path
 from helper import get_control_digit, get_formatted_book_number
 from kwparser import parse_directory
@@ -31,7 +37,6 @@ from scraping_functions.validation import (
     validate_scrape_result,
 )
 
-load_dotenv()
 logger = logging.getLogger(__name__)
 
 # Get environment variables - now using DATABASE_URL instead of MONGO_URI
@@ -355,6 +360,27 @@ def cleanup_local_folder(directory_path):
 
 
 def download_worker(scraper, department_code, ekw_number):
+    """Trace all work for one book with a stable correlation ID."""
+    correlation_id = f"book-{department_code}-{ekw_number}"
+    with correlation_context(correlation_id):
+        logger.info(
+            "book_processing_started",
+            extra={
+                "context": {
+                    "department_code": department_code,
+                    "book_number": ekw_number,
+                }
+            },
+        )
+        outcome = _download_worker(scraper, department_code, ekw_number)
+        logger.info(
+            "book_processing_finished",
+            extra={"context": {"outcome": outcome.value}},
+        )
+        return outcome
+
+
+def _download_worker(scraper, department_code, ekw_number):
     """Worker function for downloading and parsing a single book"""
     try:
         # Format book number and control digit

@@ -3,6 +3,7 @@
 import logging
 import time
 
+from logging_config import correlation_context
 from scraping_functions.errors import ApplicationError, QueueError, log_error
 
 
@@ -26,6 +27,12 @@ class ReliableQueueHandler:
         self.logger = logger or logging.getLogger(__name__)
 
     def handle(self, message):
+        """Process a message inside its own traceable logging context."""
+        message_id = getattr(message, "id", repr(message))
+        with correlation_context(f"queue-{message_id}"):
+            return self._handle(message)
+
+    def _handle(self, message):
         """Handle one message and return True only after it is acknowledged.
 
         The first attempt runs immediately. Each failure is followed by one of

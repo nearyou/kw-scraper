@@ -56,7 +56,8 @@ Base.metadata.create_all(engine)
 def parse_directory(subdirectory_path, **kwargs):
     # Initialize session
     print(f"[Parser] START: Parsing directory {subdirectory_path}")
-    print(f"[Parser] DB URL: {DATABASE_URL}")
+    # Never write database credentials into persistent application logs.
+    print(f"[Parser] Database configured: {bool(DATABASE_URL)}")
     Session = sessionmaker(bind=engine)
     session = Session()
 

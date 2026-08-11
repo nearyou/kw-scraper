@@ -1,6 +1,7 @@
 import unittest
 from unittest.mock import Mock
 
+from logging_config import get_correlation_id
 from scraping_functions.errors import QueueError
 from www.queue_handler import ReliableQueueHandler
 
@@ -33,6 +34,18 @@ class ReliableQueueHandlerTests(unittest.TestCase):
         self.acknowledge.assert_called_once_with(message)
         self.dead_letter.assert_not_called()
         self.sleep.assert_not_called()
+
+    def test_binds_message_correlation_id_during_processing(self):
+        seen_ids = []
+
+        def processor(_message):
+            seen_ids.append(get_correlation_id())
+            return True
+
+        handler = self.make_handler(processor)
+
+        self.assertTrue(handler.handle(Message()))
+        self.assertEqual(seen_ids, ["queue-42"])
 
     def test_retries_with_exponential_delays_then_acknowledges(self):
         processor = Mock(side_effect=[RuntimeError("one"), RuntimeError("two"), RuntimeError("three"), True])

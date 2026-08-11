@@ -1,6 +1,5 @@
 """Typed application errors and safe structured error logging."""
 
-import json
 import logging
 
 
@@ -68,7 +67,7 @@ def log_error(logger, error, *, level=logging.ERROR, exc_info=False):
         }
     logger.log(
         level,
-        "application_error %s",
-        json.dumps(payload, sort_keys=True, default=str),
+        "application_error",
+        extra={"context": payload},
         exc_info=exc_info,
     )
