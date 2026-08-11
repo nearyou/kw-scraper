@@ -120,10 +120,20 @@ class ProcessSafeRotatingFileHandler(RotatingFileHandler):
         super().emit(record)
 
 
-def build_handlers(log_file, *, service, max_bytes=MAX_LOG_BYTES, backup_count=DEFAULT_BACKUP_COUNT):
+def build_handlers(
+    log_file,
+    *,
+    service,
+    console_level=logging.ERROR,
+    file_level=logging.INFO,
+    max_bytes=MAX_LOG_BYTES,
+    backup_count=DEFAULT_BACKUP_COUNT,
+):
+    """Build quiet-console and detailed-file handlers."""
     formatter = JsonFormatter(service)
     console = logging.StreamHandler(_original_stdout)
     console.setFormatter(formatter)
+    console.setLevel(console_level)
 
     rotating_file = ProcessSafeRotatingFileHandler(
         log_file,
@@ -133,6 +143,7 @@ def build_handlers(log_file, *, service, max_bytes=MAX_LOG_BYTES, backup_count=D
         delay=True,
     )
     rotating_file.setFormatter(formatter)
+    rotating_file.setLevel(file_level)
     return console, rotating_file
 
 
@@ -177,22 +188,40 @@ class _LogStream:
         return "utf-8"
 
 
-def configure_logging(*, service=None, log_file=None, level=None, capture_streams=False):
-    """Configure idempotent JSON console and 10 MB rotating file logging."""
+def configure_logging(
+    *,
+    service=None,
+    log_file=None,
+    level=None,
+    console_level=None,
+    capture_streams=False,
+):
+    """Log details to rotating files while showing only console errors by default."""
     service = service or os.getenv("SERVICE_NAME", "kw-scraper")
     log_file = log_file or os.getenv("LOG_FILE", "logs/kw-scraper.log")
     level_name = (level or os.getenv("LOG_LEVEL", "INFO")).upper()
     resolved_level = getattr(logging, level_name, logging.INFO)
+    console_level_name = (
+        console_level or os.getenv("CONSOLE_LOG_LEVEL", "ERROR")
+    ).upper()
+    resolved_console_level = getattr(logging, console_level_name, logging.ERROR)
     root = logging.getLogger()
 
     if not getattr(root, "_kw_json_configured", False):
         for handler in list(root.handlers):
             root.removeHandler(handler)
             handler.close()
-        for handler in build_handlers(log_file, service=service):
+        for handler in build_handlers(
+            log_file,
+            service=service,
+            console_level=resolved_console_level,
+            file_level=resolved_level,
+        ):
             root.addHandler(handler)
         root._kw_json_configured = True
-    root.setLevel(resolved_level)
+    # The root accepts both handler thresholds. Each handler independently
+    # decides what reaches the console or the detailed rotating log file.
+    root.setLevel(min(resolved_level, resolved_console_level))
     logging.captureWarnings(True)
 
     if capture_streams and not isinstance(sys.stdout, _LogStream):

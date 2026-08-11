@@ -1369,6 +1369,7 @@ def start_celery_workers():
         CELERY_CONCURRENCY = os.getenv('CELERY_CONCURRENCY', '4')
         CELERY_POOL = os.getenv('CELERY_POOL', 'prefork')
         CELERY_PREFETCH = os.getenv('CELERY_PREFETCH_MULTIPLIER', None)
+        CELERY_LOG_LEVEL = os.getenv('CELERY_LOG_LEVEL', 'ERROR')
 
         # Base command
         cmd = [
@@ -1376,7 +1377,7 @@ def start_celery_workers():
             '-m', 'celery',
             '-A', 'www.main.celery',
             'worker',
-            '--loglevel=info',
+            f'--loglevel={CELERY_LOG_LEVEL.lower()}',
             '--detach'
         ]
 

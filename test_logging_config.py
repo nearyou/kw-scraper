@@ -46,6 +46,23 @@ class JsonLoggingTests(unittest.TestCase):
                 self.assertEqual(file_handler.maxBytes, MAX_LOG_BYTES)
                 self.assertEqual(file_handler.maxBytes, 10 * 1024 * 1024)
                 self.assertGreater(file_handler.backupCount, 0)
+                self.assertEqual(console.level, logging.ERROR)
+                self.assertEqual(file_handler.level, logging.INFO)
+            finally:
+                console.close()
+                file_handler.close()
+
+    def test_console_and_file_levels_can_be_configured_independently(self):
+        with tempfile.TemporaryDirectory() as directory:
+            console, file_handler = build_handlers(
+                Path(directory) / "app.log",
+                service="tests",
+                console_level=logging.CRITICAL,
+                file_level=logging.DEBUG,
+            )
+            try:
+                self.assertEqual(console.level, logging.CRITICAL)
+                self.assertEqual(file_handler.level, logging.DEBUG)
             finally:
                 console.close()
                 file_handler.close()
