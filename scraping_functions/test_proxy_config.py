@@ -16,10 +16,11 @@ class ProxyConfigurationTests(unittest.TestCase):
     def test_returns_none_when_proxy_is_not_configured(self):
         self.assertIsNone(load_proxy_settings({}))
 
-    def test_uses_bright_data_default_port(self):
+    def test_loads_explicit_proxy_port(self):
         settings = load_proxy_settings(
             {
                 "PROXY_HOST": "brd.superproxy.io",
+                "PROXY_PORT": "33335",
                 "PROXY_USERNAME": "customer-zone",
                 "PROXY_PASSWORD": "secret",
             }
@@ -31,7 +32,11 @@ class ProxyConfigurationTests(unittest.TestCase):
     def test_rejects_partial_credentials_without_exposing_values(self):
         with self.assertRaisesRegex(ValueError, "PROXY_PASSWORD") as raised:
             load_proxy_settings(
-                {"PROXY_HOST": "proxy.example", "PROXY_USERNAME": "sensitive-user"}
+                {
+                    "PROXY_HOST": "proxy.example",
+                    "PROXY_PORT": "3000",
+                    "PROXY_USERNAME": "sensitive-user",
+                }
             )
         self.assertNotIn("sensitive-user", str(raised.exception))
 
@@ -55,11 +60,22 @@ class ProxyConfigurationTests(unittest.TestCase):
             database_url = f"sqlite:///{Path(directory) / 'proxy.db'}"
             engine = create_engine(database_url)
             Proxy.__table__.create(engine)
+            with engine.begin() as connection:
+                connection.execute(
+                    Proxy.__table__.insert(),
+                    {
+                        "id": "obsolete-proxy",
+                        "host": "old.proxy.example",
+                        "port": "9999",
+                        "is_direct": False,
+                    },
+                )
             proxy_environment = {
                 "PROXY_HOST": "brd.superproxy.io",
                 "PROXY_PORT": "33335",
                 "PROXY_USERNAME": "customer-zone",
                 "PROXY_PASSWORD": "secret",
+                "PROXY_REPLACE_EXISTING": "true",
             }
 
             with patch.dict(os.environ, proxy_environment, clear=False):

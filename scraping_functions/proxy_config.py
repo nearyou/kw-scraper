@@ -14,6 +14,7 @@ class ProxySettings:
     username: str
     password: str
     scheme: str = "http"
+    replace_existing: bool = False
 
 
 def load_proxy_settings(
@@ -21,9 +22,7 @@ def load_proxy_settings(
 ) -> Optional[ProxySettings]:
     """Load a proxy from ``PROXY_*`` variables, or return ``None`` if disabled.
 
-    Bright Data's shared superproxy port is 33335, so it is used when a host is
-    configured without an explicit port. Credentials are deliberately never
-    included in validation errors or logs.
+    Credentials are deliberately never included in validation errors or logs.
     """
 
     values = os.environ if environ is None else environ
@@ -35,13 +34,13 @@ def load_proxy_settings(
 
     missing = [
         name
-        for name in ("PROXY_HOST", "PROXY_USERNAME", "PROXY_PASSWORD")
+        for name in ("PROXY_HOST", "PROXY_PORT", "PROXY_USERNAME", "PROXY_PASSWORD")
         if not configured[name]
     ]
     if missing:
         raise ValueError(f"Incomplete proxy configuration; missing {', '.join(missing)}")
 
-    port = configured["PROXY_PORT"] or "33335"
+    port = configured["PROXY_PORT"]
     try:
         numeric_port = int(port)
     except ValueError as error:
@@ -53,10 +52,15 @@ def load_proxy_settings(
     if scheme not in {"http", "https"}:
         raise ValueError("PROXY_SCHEME must be http or https")
 
+    replace_existing = str(values.get("PROXY_REPLACE_EXISTING", "false")).strip().lower()
+    if replace_existing not in {"true", "false", "1", "0", "yes", "no"}:
+        raise ValueError("PROXY_REPLACE_EXISTING must be true or false")
+
     return ProxySettings(
         host=configured["PROXY_HOST"],
         port=str(numeric_port),
         username=configured["PROXY_USERNAME"],
         password=configured["PROXY_PASSWORD"],
         scheme=scheme,
+        replace_existing=replace_existing in {"true", "1", "yes"},
     )

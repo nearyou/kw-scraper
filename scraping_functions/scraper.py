@@ -846,7 +846,19 @@ class Scraper:
         )
         session = self.Session()
         try:
-            if session.query(Proxy).filter_by(id=proxy_id).first() is not None:
+            existing_proxy = session.query(Proxy).filter_by(id=proxy_id).first()
+
+            # When one environment proxy is explicitly marked authoritative,
+            # remove obsolete database proxies before workers can select them.
+            # The current proxy is preserved so its cookies and counters survive.
+            if settings.replace_existing:
+                session.query(Proxy).filter(
+                    Proxy.id != proxy_id,
+                    Proxy.is_direct.is_(False),
+                ).delete(synchronize_session=False)
+
+            if existing_proxy is not None:
+                session.commit()
                 return True
 
             session.add(
@@ -869,6 +881,12 @@ class Scraper:
                 session.rollback()
                 if session.query(Proxy).filter_by(id=proxy_id).first() is None:
                     raise
+                if settings.replace_existing:
+                    session.query(Proxy).filter(
+                        Proxy.id != proxy_id,
+                        Proxy.is_direct.is_(False),
+                    ).delete(synchronize_session=False)
+                    session.commit()
 
             logger.info(
                 "environment_proxy_ready",
