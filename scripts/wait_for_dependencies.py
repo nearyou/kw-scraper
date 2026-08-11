@@ -1,6 +1,7 @@
 """Wait for PostgreSQL and RabbitMQ before starting a container service."""
 
 import os
+import logging
 import sys
 import time
 from pathlib import Path
@@ -12,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from logging_config import configure_logging  # noqa: E402
 
 
-logger = configure_logging(capture_streams=True).getChild("startup")
+logger = logging.getLogger("startup")
 
 
 def check_database(database_url):
@@ -82,4 +83,5 @@ def wait_for_dependencies():
 
 
 if __name__ == "__main__":
+    configure_logging(capture_streams=True)
     sys.exit(0 if wait_for_dependencies() else 1)

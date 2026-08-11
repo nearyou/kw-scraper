@@ -82,15 +82,51 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(payload, ensure_ascii=False, default=str, separators=(",", ":"))
 
 
+def _process_log_path(log_file, process_id):
+    path = Path(log_file)
+    suffix = path.suffix or ".log"
+    stem = path.stem if path.suffix else path.name
+    return path.with_name(f"{stem}-{process_id}{suffix}")
+
+
+class ProcessSafeRotatingFileHandler(RotatingFileHandler):
+    """Rotate a separate file per process to avoid multi-process races."""
+
+    def __init__(self, log_file, **kwargs):
+        self.log_file = Path(log_file)
+        self._handler_process_id = os.getpid()
+        process_path = _process_log_path(self.log_file, self._handler_process_id)
+        process_path.parent.mkdir(parents=True, exist_ok=True)
+        super().__init__(process_path, **kwargs)
+
+    def _switch_after_fork(self):
+        process_id = os.getpid()
+        if process_id == self._handler_process_id:
+            return
+        self.acquire()
+        try:
+            if self.stream:
+                self.stream.close()
+                self.stream = None
+            process_path = _process_log_path(self.log_file, process_id)
+            process_path.parent.mkdir(parents=True, exist_ok=True)
+            self.baseFilename = os.path.abspath(process_path)
+            self._handler_process_id = process_id
+        finally:
+            self.release()
+
+    def emit(self, record):
+        self._switch_after_fork()
+        super().emit(record)
+
+
 def build_handlers(log_file, *, service, max_bytes=MAX_LOG_BYTES, backup_count=DEFAULT_BACKUP_COUNT):
     formatter = JsonFormatter(service)
     console = logging.StreamHandler(_original_stdout)
     console.setFormatter(formatter)
 
-    log_path = Path(log_file)
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    rotating_file = RotatingFileHandler(
-        log_path,
+    rotating_file = ProcessSafeRotatingFileHandler(
+        log_file,
         maxBytes=max_bytes,
         backupCount=backup_count,
         encoding="utf-8",

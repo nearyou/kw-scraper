@@ -36,6 +36,7 @@ from scraping_functions.validation import (
     validate_html_document,
     validate_scrape_result,
 )
+from scraping_functions.worker_pool import ThreadLocalResourcePool
 
 logger = logging.getLogger(__name__)
 
@@ -571,8 +572,8 @@ def main():
     start_from = int(input("Enter the starting book number (e.g., 0): "))
     end_at = int(input("Enter the ending book number (e.g., 1000): "))
 
-    # Create and configure the scraper
-    scraper = setup_scraper()
+    # Stateful browsers are owned by one executor thread each.
+    scraper_pool = ThreadLocalResourcePool(setup_scraper, logger=logger)
 
     try:
         # Start timing if in test mode
@@ -592,17 +593,19 @@ def main():
             )
 
             pending = {}
-            completed = set()
             book_iter = iter(range(start_from, end_at + 1))
+
+            def process_book(number):
+                return download_worker(
+                    scraper_pool.get(), department_code, number
+                )
 
             def submit_next():
                 try:
                     n = next(book_iter)
                 except StopIteration:
                     return None
-                f = download_executor.submit(
-                    download_worker, scraper, department_code, n
-                )
+                f = download_executor.submit(process_book, n)
                 pending[f] = n
                 return f
 
@@ -614,23 +617,25 @@ def main():
             except Exception:
                 pass
 
-            # Process as futures complete, submitting new ones to keep window filled
-            for fut in concurrent.futures.as_completed(list(pending.keys())):
-                book_num = pending.pop(fut)
-                completed.add(fut)
-                try:
-                    fut.result()
-                except Exception as e:
-                    print(f"Error processing book {book_num}: {e}")
-
-                # Submit next to refill window
-                submit_next()
+            # Keep tracking futures added after the initial bounded window.
+            while pending:
+                done, _ = concurrent.futures.wait(
+                    tuple(pending),
+                    return_when=concurrent.futures.FIRST_COMPLETED,
+                )
+                for future in done:
+                    book_num = pending.pop(future)
+                    try:
+                        future.result()
+                    except Exception as e:
+                        print(f"Error processing book {book_num}: {e}")
+                    submit_next()
 
     except KeyboardInterrupt:
         print("\nScraping interrupted by user.")
     finally:
         # Clean up resources
-        scraper.close()
+        scraper_pool.close_all()
 
         # End timing if in test mode
         if TEST_MODE:

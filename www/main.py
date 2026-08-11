@@ -42,7 +42,7 @@ except ImportError:
 
 from celery import Celery, chain
 from celery.backends.base import DisabledBackend
-from celery.signals import before_task_publish
+from celery.signals import before_task_publish, worker_ready
 from celery.result import AsyncResult, current_app
 from sqlalchemy import and_, not_, exists
 from celery.exceptions import MaxRetriesExceededError
@@ -59,12 +59,14 @@ from www.health import (
     probe_queue,
     probe_storage,
 )
+from www.database_config import build_database_uri, database_engine_options
 from www.queue_handler import ReliableQueueHandler
 
 # Import the cleaned, refactored kwscraper functions
 from kwscraper import DownloadOutcome, run_scraper, setup_scraper, download_worker, processing_done_event, cleanup_local_folder
 from scraping_functions.errors import NetworkError
 from scraping_functions.progress import ContiguousProgressTracker
+from scraping_functions.worker_pool import ThreadLocalResourcePool
 from helper import get_formatted_book_number, get_control_digit
 
 from department_codes import DEPARTMENT_CODES
@@ -133,15 +135,9 @@ def clear_request_logging(_error=None):
 
 DATABASE_URL = os.getenv('DATABASE_URL')
 logger.info("database_configuration_loaded", extra={"context": {"configured": bool(DATABASE_URL)}})
-app.config['SQLALCHEMY_DATABASE_URI'] = f'{DATABASE_URL}?sslmode=disable'
+app.config['SQLALCHEMY_DATABASE_URI'] = build_database_uri(DATABASE_URL)
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
-    'pool_size': 10,           # Reduced from 20 to prevent connection exhaustion
-    'max_overflow': 5,         # Reduced from 10
-    'pool_timeout': 30,        # Connection acquisition timeout
-    'pool_recycle': 300,       # 5 min (was 30 min) - more aggressive recycling
-    'pool_pre_ping': True,     # KEY FIX: Verify connection is alive before using
-}
+app.config['SQLALCHEMY_ENGINE_OPTIONS'] = database_engine_options(DATABASE_URL)
 
 db.init_app(app)
 migrate = Migrate(app, db, directory='../migrations')
@@ -314,8 +310,9 @@ def scrape_task(self, department_code, start_from=0, end_at=999999, resume_from_
         # Progress tracking is now handled via TaskQueue.books_processed and ScrapingProgress.task_id
         print(f"Starting scraping for {department_code} from book {start_from}")
 
-        # Initialize the scraper
-        scraper = setup_scraper()
+        # Each executor thread owns a browser/session; sharing one browser here
+        # caused cookies and page navigation to race between books.
+        scraper_pool = ThreadLocalResourcePool(setup_scraper, logger=logger)
 
         try:
             # Reset the processing done event to False
@@ -332,12 +329,17 @@ def scrape_task(self, department_code, start_from=0, end_at=999999, resume_from_
                 pending = {}
                 book_iter = iter(range(start_from, end_at + 1))
 
+                def _download(n):
+                    return download_worker(
+                        scraper_pool.get(), department_code, n
+                    )
+
                 def _submit_next():
                     try:
                         n = next(book_iter)
                     except StopIteration:
                         return None
-                    f = download_executor.submit(download_worker, scraper, department_code, n)
+                    f = download_executor.submit(_download, n)
                     pending[f] = n
                     return f
 
@@ -347,27 +349,34 @@ def scrape_task(self, department_code, start_from=0, end_at=999999, resume_from_
                         break
 
                 completed_books = []
-                for future in concurrent.futures.as_completed(list(pending.keys())):
-                    book_num = pending.pop(future)
-                    try:
-                        result = future.result()
-                        if result:  # If download was successful
-                            completed_books.append(book_num)
-                            if not last_scraped_book or book_num > last_scraped_book:
-                                last_scraped_book = book_num
-                    except Exception as e:
-                        print(f"Download failed for book {book_num}: {e}")
+                while pending:
+                    done, _ = concurrent.futures.wait(
+                        tuple(pending),
+                        return_when=concurrent.futures.FIRST_COMPLETED,
+                    )
+                    for future in done:
+                        book_num = pending.pop(future)
+                        try:
+                            result = future.result()
+                            if result is not DownloadOutcome.FAILED:
+                                completed_books.append(book_num)
+                                if (
+                                    last_scraped_book is None
+                                    or book_num > last_scraped_book
+                                ):
+                                    last_scraped_book = book_num
+                        except Exception as e:
+                            print(f"Download failed for book {book_num}: {e}")
 
-                    # Refill the window
-                    _submit_next()
+                        # Refill the bounded window and track every new future.
+                        _submit_next()
 
                 # Signal that processing is done
                 processing_done_event.set()
 
         finally:
             # Always clean up resources
-            if scraper:
-                scraper.close()
+            scraper_pool.close_all()
             gc.collect()  # Free up memory
         # Update ScrapingProgress table - Note: This should use task-specific progress
         # This function is deprecated in favor of TaskQueue system
@@ -491,22 +500,19 @@ def queue_manager_task(self):
                         time.sleep(60)  # Wait 1 minute before next check
                         continue
                 
-                # Get the next pending task from the queue
-                next_task = TaskQueue.get_next_pending_task()
-                
                 # Check if there are any stopping tasks that need to be marked as stopped
                 stopping_tasks = TaskQueue.query.filter_by(status='stopping').all()
                 if stopping_tasks:
                     print(f"Found {len(stopping_tasks)} stopping tasks, waiting for them to complete...")
                     time.sleep(5)  # Give stopping tasks time to finish
                     continue
+
+                # Claim only after stop handling, otherwise a task could be left
+                # in_progress while the loop waits on an unrelated stop request.
+                next_task = TaskQueue.claim_next_pending_task()
                 
                 if next_task:
                     print(f"Found pending task: {next_task}")
-                    # Mark the task as in progress
-                    next_task.status = 'in_progress'
-                    next_task.books_total = next_task.end_at - next_task.start_from + 1
-                    db.session.commit()
                     def process_queue_message(message):
                         # A rollback gives every retry a clean database session.
                         db.session.rollback()
@@ -544,7 +550,7 @@ def queue_manager_task(self):
                 else:
                     # No regular tasks - check for idle tasks
                     from www.models import IdleTasks
-                    next_idle_task = IdleTasks.get_next_pending_task()
+                    next_idle_task = IdleTasks.claim_next_pending_task()
                     if next_idle_task:
                         print(f"Found pending idle task: {next_idle_task}")
                         try:
@@ -575,13 +581,21 @@ def queue_manager_task(self):
     finally:
         lock.release()
 
-# Automatically start the queue manager when Celery starts
-@celery.on_after_configure.connect
-def setup_periodic_tasks(sender, **kwargs):
-    print("Setting up automatic queue manager...")
+# Start the queue manager only after Celery can safely execute tasks. Publishing
+# during on_after_configure races with prefork trace initialization on Windows.
+@worker_ready.connect
+def setup_queue_manager(sender=None, **kwargs):
+    print("Checking automatic queue manager after worker startup...")
     # Only start the queue manager if not already running
     inspector = celery.control.inspect(timeout=5.0)
-    active_tasks = inspector.active() or {}
+    try:
+        active_tasks = inspector.active() or {}
+    except Exception as error:
+        logger.warning(
+            "queue_manager_inspection_failed",
+            extra={"context": {"error_type": type(error).__name__}},
+        )
+        active_tasks = {}
     queue_manager_running = False
     for worker_name, tasks in active_tasks.items():
         for task in tasks:
@@ -653,23 +667,7 @@ def scrape_task_direct(task_id, department_code, start_from=0, end_at=999999):
 
         try:
             # Initialize per-thread scrapers (each worker gets its own to avoid contention)
-            scrapers_cache = {}  # Thread-safe cache of scraper instances per thread
-            scrapers_lock = threading.Lock()
-            
-            def get_thread_scraper():
-                """Get or create a scraper instance for the current thread"""
-                thread_id = threading.get_ident()
-                # Check cache first without lock (fast path)
-                if thread_id in scrapers_cache:
-                    return scrapers_cache[thread_id]
-                
-                # Only lock when creating new scraper (slow path)
-                with scrapers_lock:
-                    # Double-check in case another thread created it while we waited
-                    if thread_id not in scrapers_cache:
-                        scrapers_cache[thread_id] = setup_scraper()
-                        print(f"Created new scraper instance for thread {thread_id}")
-                    return scrapers_cache[thread_id]
+            scraper_pool = ThreadLocalResourcePool(setup_scraper, logger=logger)
             
             processing_done_event.clear()
             print(f"Starting scraper with {DOWNLOAD_WORKERS} download workers")
@@ -703,11 +701,11 @@ def scrape_task_direct(task_id, department_code, start_from=0, end_at=999999):
                         print(f"Worker {thread_local.worker_id} processing book: {book_number}")
                         
                         # Get this thread's dedicated scraper instance
-                        thread_scraper = get_thread_scraper()
+                        thread_scraper = scraper_pool.get()
                         
                         # Failed books are deliberately not counted as progress.
                         # The coordinator retries from the first unfinished book.
-                        result = False
+                        result = DownloadOutcome.FAILED
                         try:
                             result = download_worker(thread_scraper, department_code, book_number)
                         except Exception as e:
@@ -722,7 +720,8 @@ def scrape_task_direct(task_id, department_code, start_from=0, end_at=999999):
                             return False  # Signal to stop processing
 
                         # Success-specific handling (success counters)
-                        if result:
+                        succeeded = result is not DownloadOutcome.FAILED
+                        if succeeded:
                             print(f"Worker {thread_local.worker_id} successfully processed book: {book_number}")
                             with lock:
                                 processing_results['success'] += 1
@@ -732,7 +731,7 @@ def scrape_task_direct(task_id, department_code, start_from=0, end_at=999999):
                                 processing_results['failed'] += 1
                         with lock:
                             processing_results['attempts'] += 1
-                        return bool(result)
+                        return succeeded
                 
                 # Create a lock for thread safety
                 lock = threading.Lock()
@@ -840,12 +839,7 @@ def scrape_task_direct(task_id, department_code, start_from=0, end_at=999999):
             processing_done_event.set()
         finally:
             # Close all thread-specific scrapers
-            for thread_id, scraper_instance in scrapers_cache.items():
-                try:
-                    scraper_instance.close()
-                    print(f"Closed scraper for thread {thread_id}")
-                except Exception as e:
-                    print(f"Error closing scraper for thread {thread_id}: {e}")
+            scraper_pool.close_all()
             gc.collect()  # Free up memory
 
         if processing_failed:
@@ -887,8 +881,7 @@ def scrape_task_direct(task_id, department_code, start_from=0, end_at=999999):
 def scrape_idle_task(idle_task_id):
     """Process an IdleTasks entry representing a range of books for a single court.
 
-    Uses a single shared scraper instance and a ThreadPoolExecutor to mimic regular
-    scraping concurrency (DOWNLOAD_WORKERS). Stops early when consecutive empty
+    Uses one scraper per executor thread. Stops early when consecutive empty
     results reach IDLE_EMPTY_STREAK_LIMIT or when regular tasks appear.
     """
     from www.models import IdleTasks, IdleStatus
@@ -899,12 +892,14 @@ def scrape_idle_task(idle_task_id):
         print(f"Idle task {idle_task_id} not found")
         return False
 
-    if idle_task.status != 'pending':
-        print(f"Idle task {idle_task_id} is not pending (status: {idle_task.status})")
+    if idle_task.status not in ('pending', 'in_progress'):
+        print(f"Idle task {idle_task_id} cannot run (status: {idle_task.status})")
         return False
 
-    # Mark started
-    idle_task.mark_started()
+    # Direct callers may still pass a pending task; queue-manager claims are
+    # already in progress and must not be rejected.
+    if idle_task.status == 'pending':
+        idle_task.mark_started()
     kod_wydzialu = idle_task.kod_wydzialu
     # Resume from last_processed+1 if available, otherwise from configured start_from
     start_from_cfg = int(getattr(idle_task, 'start_from', 0))
@@ -926,20 +921,9 @@ def scrape_idle_task(idle_task_id):
     except Exception:
         db.session.rollback()
 
-    # Shared scraper instance used for initial cookie seeding; individual threads
-    # will create their own scraper instances to avoid contention.
-    scraper = setup_scraper()
-    scrapers_cache = {}
-
-    def get_thread_scraper():
-        tid = threading.get_ident()
-        if tid not in scrapers_cache:
-            try:
-                scrapers_cache[tid] = setup_scraper()
-            except Exception as e:
-                # Fall back to shared scraper if creation fails
-                scrapers_cache[tid] = scraper
-        return scrapers_cache[tid]
+    # Never fall back to a shared browser: a failed per-thread setup should be
+    # retried as a failed message, not create concurrent browser access.
+    scraper_pool = ThreadLocalResourcePool(setup_scraper, logger=logger)
 
     try:
         # Use single continuous loop structure similar to scrape_task_direct
@@ -953,7 +937,7 @@ def scrape_idle_task(idle_task_id):
 
         # Worker wrapper that ensures each thread uses its own scraper
         def download_wrapper(num):
-            thread_scraper = get_thread_scraper()
+            thread_scraper = scraper_pool.get()
             return download_worker(thread_scraper, kod_wydzialu, num)
 
         # Use a bounded in-flight sliding window submission similar to main scraping
@@ -1102,18 +1086,7 @@ def scrape_idle_task(idle_task_id):
                 db.session.commit()
             except Exception:
                 db.session.rollback()
-            # Close the shared scraper AND every per-thread scraper to avoid leaks
-            if scraper:
-                try:
-                    scraper.close()
-                except Exception:
-                    pass
-            for scraper_instance in scrapers_cache.values():
-                try:
-                    if scraper_instance is not scraper:
-                        scraper_instance.close()
-                except Exception:
-                    pass
+            scraper_pool.close_all()
         except Exception:
             pass
 

@@ -5,10 +5,12 @@ import unittest
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from unittest.mock import patch
 
 from logging_config import (
     MAX_LOG_BYTES,
     JsonFormatter,
+    ProcessSafeRotatingFileHandler,
     build_handlers,
     correlation_context,
     get_correlation_id,
@@ -40,9 +42,30 @@ class JsonLoggingTests(unittest.TestCase):
             )
             try:
                 self.assertIsInstance(file_handler, RotatingFileHandler)
+                self.assertIsInstance(file_handler, ProcessSafeRotatingFileHandler)
                 self.assertEqual(file_handler.maxBytes, MAX_LOG_BYTES)
                 self.assertEqual(file_handler.maxBytes, 10 * 1024 * 1024)
                 self.assertGreater(file_handler.backupCount, 0)
+            finally:
+                console.close()
+                file_handler.close()
+
+    def test_file_handler_switches_to_child_process_file_after_fork(self):
+        with tempfile.TemporaryDirectory() as directory:
+            console, file_handler = build_handlers(
+                Path(directory) / "worker.log", service="tests"
+            )
+            original_path = file_handler.baseFilename
+            try:
+                record = logging.LogRecord(
+                    "test", logging.INFO, __file__, 10, "child", (), None
+                )
+                child_process_id = file_handler._handler_process_id + 1
+                with patch("logging_config.os.getpid", return_value=child_process_id):
+                    file_handler.emit(record)
+
+                self.assertNotEqual(file_handler.baseFilename, original_path)
+                self.assertIn(str(child_process_id), file_handler.baseFilename)
             finally:
                 console.close()
                 file_handler.close()
