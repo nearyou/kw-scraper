@@ -64,13 +64,17 @@ Start the queue manager / scrapers (RabbitMQ and PostgreSQL must be up):
 
 ```bash
 # Celery worker (runs `queue_manager_task` which processes TaskQueue entries)
-celery -A www.main.celery worker --loglevel=info --concurrency=4
+celery -A www.main.celery worker --pool=threads --loglevel=error --concurrency=4
 
 # Web panel (dev)
 flask --app www.main run --port 8000
 # or production-style
 gunicorn www.main:app --bind 0.0.0.0:8000 --worker-class gthread --workers 2 --threads 2
 ```
+
+The terminal shows errors only by default. Detailed INFO events remain available
+as rotating JSON files under `logs/`; set `CONSOLE_LOG_LEVEL=INFO` temporarily
+when interactive progress output is needed.
 
 The queue manager starts automatically (see `@celery.on_after_configure` in `www/main.py`); it also self-restarts if it stops. Regular scraping tasks are created through the web panel (`TaskQueue`). When the queue is empty, **idle scraping** (`scrape_idle_task`) processes court codes from `www/codes.json` alphabetically.
 

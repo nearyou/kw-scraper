@@ -1,7 +1,10 @@
 import hashlib
+import logging
 import os
 import random
 import re
+import json
+import tempfile
 
 # Import the Proxy model
 import sys
@@ -16,12 +19,23 @@ from DrissionPage import ChromiumOptions, ChromiumPage
 
 # Import SQLAlchemy dependencies
 from sqlalchemy import create_engine
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import scoped_session, sessionmaker
 
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.append(parent_dir)
 from www.models import Proxy, db
+from scraping_functions.errors import (
+    CaptchaError,
+    CircuitOpenError,
+    DataError,
+    NetworkError,
+    log_error,
+)
+from scraping_functions.resilience import CircuitBreaker, backoff_delay, retry_external_call
+from scraping_functions.session_manager import BrowserSessionManager, DEFAULT_HEADERS
+from scraping_functions.proxy_config import load_proxy_settings
+from scraping_functions.proxy_bridge import AuthenticatedProxyBridge
 
 # Load environment variables
 load_dotenv()
@@ -48,16 +62,24 @@ RATE_LIMIT_ENABLED = os.getenv("RATE_LIMIT_ENABLED", "true").lower() in (
 RATE_LIMIT_MIN = float(os.getenv("RATE_LIMIT_MIN", "2.0"))
 RATE_LIMIT_MAX = float(os.getenv("RATE_LIMIT_MAX", "4.0"))
 
-# Circuit-breaker DISABLED - was causing cascade failures
-# CB_THRESHOLD = int(os.getenv('CB_THRESHOLD', '3'))
-# CB_BASE = int(os.getenv('CB_BASE', '10'))
-# CB_MAX = int(os.getenv('CB_MAX', '120'))
-# CB_RESET_SECONDS = int(os.getenv('CB_RESET_SECONDS', '120'))
+logger = logging.getLogger(__name__)
 
-# DISABLED - No longer using singleton browser or circuit breaker
-# connection_failures = 0
-# last_failure_time = 0
-# BROWSER_INSTANCE = None
+# Shared by all scraper instances. Once failures cross the threshold, workers
+# pause together; after the cooldown, a single worker probes site recovery.
+GOVERNMENT_SITE_CIRCUIT = CircuitBreaker(
+    "ekw-government-site",
+    failure_threshold=int(os.getenv("CB_THRESHOLD", "5")),
+    recovery_timeout=int(os.getenv("CB_RESET_SECONDS", "60")),
+)
+EXTERNAL_RETRY_ATTEMPTS = int(os.getenv("EXTERNAL_RETRY_ATTEMPTS", "3"))
+EXTERNAL_RETRY_BASE = float(os.getenv("CB_BASE", "1"))
+EXTERNAL_RETRY_MAX = float(os.getenv("CB_MAX", "30"))
+ELEMENT_TIMEOUT = float(os.getenv("ELEMENT_TIMEOUT", "10"))
+PAGE_LOAD_TIMEOUT = float(os.getenv("PAGE_LOAD_TIMEOUT", "45"))
+SCRIPT_TIMEOUT = float(os.getenv("SCRIPT_TIMEOUT", "20"))
+RESULT_TIMEOUT = float(os.getenv("RESULT_TIMEOUT", "15"))
+SESSION_MAX_REQUESTS = int(os.getenv("SESSION_MAX_REQUESTS", "20"))
+SESSION_MAX_AGE_SECONDS = int(os.getenv("SESSION_MAX_AGE_SECONDS", "900"))
 
 # Anti-detection delays — zredukowane: residential proxy z auto IP zmienia IP na każdy request,
 # więc agresywne opóźnienia anty-detekcyjne są zbędne.
@@ -76,42 +98,37 @@ def create_proxy_auth_extension(host, port, username, password, scheme="http"):
     Creates a Chrome extension to handle proxy authentication.
     Returns the path to the extension directory.
     """
-    # Create unique path based on ALL credentials to avoid collisions with sticky sessions (same host:port)
-    creds_hash = hashlib.md5(f"{host}{port}{username}{password}".encode()).hexdigest()[
-        :8
-    ]
-    plugin_path = f"/tmp/proxy_auth_plugin_{host}_{port}_{creds_hash}"
+    # Hash all credentials so concurrent sticky sessions never share an extension.
+    # The credentials themselves are never placed in a directory name or log line.
+    creds_hash = hashlib.md5(
+        f"{scheme}{host}{port}{username}{password}".encode()
+    ).hexdigest()[:8]
+    safe_host = re.sub(r"[^a-zA-Z0-9.-]", "_", str(host))
+    plugin_path = os.path.join(
+        tempfile.gettempdir(), f"proxy_auth_plugin_{safe_host}_{port}_{creds_hash}"
+    )
     os.makedirs(plugin_path, exist_ok=True)
 
-    manifest_json = """
-    {
+    # Manifest V3 is required by current Chromium releases. webRequestAuthProvider
+    # lets the extension answer the proxy's HTTP 407 authentication challenge.
+    manifest = {
         "version": "1.0.0",
-        "manifest_version": 2,
-        "name": "Chrome Proxy",
-        "permissions": [
-            "proxy",
-            "tabs",
-            "unlimitedStorage",
-            "storage",
-            "<all_urls>",
-            "webRequest",
-            "webRequestBlocking"
-        ],
-        "background": {
-            "scripts": ["background.js"]
-        },
-        "minimum_chrome_version": "22.0.0"
+        "manifest_version": 3,
+        "name": "KW Scraper Proxy",
+        "permissions": ["proxy", "storage", "webRequest", "webRequestAuthProvider"],
+        "host_permissions": ["<all_urls>"],
+        "background": {"service_worker": "background.js"},
+        "minimum_chrome_version": "88",
     }
-    """
 
-    background_js = f"""
+    background_js = """
     var config = {{
         mode: "fixed_servers",
         rules: {{
             singleProxy: {{
-                scheme: "{scheme}",
-                host: "{host}",
-                port: parseInt({port})
+                scheme: {scheme},
+                host: {host},
+                port: {port}
             }},
             bypassList: ["localhost"]
         }}
@@ -119,26 +136,32 @@ def create_proxy_auth_extension(host, port, username, password, scheme="http"):
 
     chrome.proxy.settings.set({{value: config, scope: "regular"}}, function() {{}});
 
-    function callbackFn(details) {{
-        return {{
+    function callbackFn(details, callback) {{
+        callback({{
             authCredentials: {{
-                username: "{username}",
-                password: "{password}"
+                username: {username},
+                password: {password}
             }}
-        }};
+        }});
     }}
 
     chrome.webRequest.onAuthRequired.addListener(
-                callbackFn,
-                {{urls: ["<all_urls>"]}},
-                ['blocking']
+        callbackFn,
+        {{urls: ["<all_urls>"]}},
+        ['asyncBlocking']
     );
-    """
+    """.format(
+        scheme=json.dumps(str(scheme)),
+        host=json.dumps(str(host)),
+        port=int(port),
+        username=json.dumps(str(username or "")),
+        password=json.dumps(str(password or "")),
+    )
 
-    with open(os.path.join(plugin_path, "manifest.json"), "w") as f:
-        f.write(manifest_json)
+    with open(os.path.join(plugin_path, "manifest.json"), "w", encoding="utf-8") as f:
+        json.dump(manifest, f)
 
-    with open(os.path.join(plugin_path, "background.js"), "w") as f:
+    with open(os.path.join(plugin_path, "background.js"), "w", encoding="utf-8") as f:
         f.write(background_js)
 
     return plugin_path
@@ -167,7 +190,7 @@ def detect_incapsula(content):
     return False
 
 
-def create_fresh_browser(proxy=None):
+def create_fresh_browser(proxy=None, user_agent=None, headers=None):
     """
     Create a fresh browser instance for each scraping session.
     This ensures unique fingerprint per session and proper proxy routing.
@@ -180,8 +203,9 @@ def create_fresh_browser(proxy=None):
     co.set_argument("--no-sandbox")
     co.set_argument("--disable-dev-shm-usage")
 
-    # Enhanced Stealth - Randomize User-Agent for EACH browser
-    user_agent = random.choice(USER_AGENTS)
+    # The session manager keeps this identity stable for several books, then
+    # deliberately rotates it when the bounded browser session is replaced.
+    user_agent = user_agent or random.choice(USER_AGENTS)
     co.set_user_agent(user_agent)
     co.set_argument("--lang=pl-PL,pl,en-US,en")
 
@@ -204,24 +228,64 @@ def create_fresh_browser(proxy=None):
     co.mute(True)
 
     # Timeouts
-    co.set_timeouts(page_load=45, script=20)
+    co.set_timeouts(
+        base=ELEMENT_TIMEOUT,
+        page_load=PAGE_LOAD_TIMEOUT,
+        script=SCRIPT_TIMEOUT,
+    )
 
-    # Handle proxy configuration
+    # Chromium does not reliably support authenticated proxy URLs, and current
+    # headless Chromium ignores authentication extensions. Route it through a
+    # local unauthenticated bridge that adds credentials only when connecting
+    # to the configured upstream proxy.
+    proxy_bridge = None
     if proxy and not proxy.is_direct and proxy.host:
         try:
-            extension_path = create_proxy_auth_extension(
-                proxy.host, proxy.port, proxy.username, proxy.password
+            proxy_scheme = getattr(
+                proxy, "scheme", os.getenv("PROXY_SCHEME", "http")
             )
-            co.add_extension(extension_path)
-            print(f"DEBUG: Added proxy extension from {extension_path}", flush=True)
+            if proxy.username or proxy.password:
+                proxy_bridge = AuthenticatedProxyBridge(
+                    proxy.host,
+                    proxy.port,
+                    proxy.username or "",
+                    proxy.password or "",
+                    scheme=proxy_scheme,
+                    connect_timeout=PAGE_LOAD_TIMEOUT,
+                ).start()
+                co.set_proxy(proxy_bridge.url)
+            else:
+                co.set_proxy(f"{proxy_scheme}://{proxy.host}:{proxy.port}")
+            logger.info(
+                "authenticated_proxy_configured",
+                extra={"context": {"host": proxy.host, "port": proxy.port}},
+            )
         except Exception as pe:
-            print(f"DEBUG: Failed to create/add proxy extension: {pe}", flush=True)
-            proxy_str = (
-                f"http://{proxy.username}:{proxy.password}@{proxy.host}:{proxy.port}"
+            # Never put the proxy URL into this log because it contains the password.
+            logger.error(
+                "authenticated_proxy_configuration_failed",
+                extra={
+                    "context": {
+                        "host": proxy.host,
+                        "port": proxy.port,
+                        "cause": type(pe).__name__,
+                    }
+                },
             )
-            co.set_proxy(proxy_str)
+            raise NetworkError(
+                "Authenticated browser proxy could not be configured",
+                operation="proxy.configure_browser",
+                context={"host": proxy.host, "port": proxy.port},
+            ) from pe
 
-    browser = ChromiumPage(co)
+    try:
+        browser = ChromiumPage(co, timeout=PAGE_LOAD_TIMEOUT)
+    except Exception:
+        if proxy_bridge is not None:
+            proxy_bridge.close()
+        raise
+    browser._authenticated_proxy_bridge = proxy_bridge
+    browser.set.headers(headers or DEFAULT_HEADERS)
 
     # ===== INJECT STEALTH JS VIA CDP — runs BEFORE every page load =====
     try:
@@ -335,9 +399,40 @@ def process_tab_scraping(tab, code, number, digit, view_type="current"):
         print(f"DEBUG: Starting tab scraping for {code}/{number}/{digit}", flush=True)
 
         # 1. Navigate to menu
+        def load_menu():
+            try:
+                tab.get(
+                    "https://ekw.ms.gov.pl/eukw_ogol/menu.do",
+                    timeout=PAGE_LOAD_TIMEOUT,
+                )
+            except Exception as error:
+                raise NetworkError(
+                    "Government site menu could not be loaded",
+                    operation="government_site.load_menu",
+                    context={"book": f"{code}/{number}/{digit}"},
+                ) from error
+
         try:
-            tab.get("https://ekw.ms.gov.pl/eukw_ogol/menu.do", timeout=30)
-        except Exception as e:
+            retry_external_call(
+                load_menu,
+                operation="government_site.load_menu",
+                attempts=EXTERNAL_RETRY_ATTEMPTS,
+                base_delay=EXTERNAL_RETRY_BASE,
+                max_delay=EXTERNAL_RETRY_MAX,
+                jitter=0.25,
+                circuit_breaker=GOVERNMENT_SITE_CIRCUIT,
+                record_success=False,
+                logger=logger,
+            )
+        except CircuitOpenError as error:
+            log_error(logger, error)
+            return {
+                "success": "0",
+                "code": "circuit-open",
+                "error_details": str(error),
+                "retry_after": error.retry_after,
+            }
+        except NetworkError as e:
             print(
                 f"🚨 CONNECTION ERROR: Cannot load menu page. Reason: {e}", flush=True
             )
@@ -413,6 +508,20 @@ def process_tab_scraping(tab, code, number, digit, view_type="current"):
                     tab.refresh()
             except Exception as retry_err:
                 print(f"⚠️ Error during attempt {attempt + 1}: {retry_err}", flush=True)
+            if attempt < 2:
+                delay = backoff_delay(
+                    attempt + 1,
+                    base=EXTERNAL_RETRY_BASE,
+                    maximum=EXTERNAL_RETRY_MAX,
+                    jitter=0.25,
+                )
+                logger.warning(
+                    "external_call_retry operation=government_site.search_form "
+                    "attempt=%s/3 delay_seconds=%.2f",
+                    attempt + 1,
+                    delay,
+                )
+                time.sleep(delay)
         else:
             print(f"🚨 CRITICAL: Search form not found after 3 attempts.", flush=True)
             print(f"🔍 DEBUG CONTEXT: URL={tab.url}, Title='{tab.title}'", flush=True)
@@ -447,7 +556,7 @@ def process_tab_scraping(tab, code, number, digit, view_type="current"):
         # 4. Wait for results
         found = False
         start = time.time()
-        max_wait = 15  # Increased timeout
+        max_wait = RESULT_TIMEOUT
 
         while time.time() - start < max_wait:
             # Handle page refresh errors gracefully
@@ -621,7 +730,7 @@ def process_tab_scraping(tab, code, number, digit, view_type="current"):
                     tab.run_js(js_submit)
 
                     # Wait for page to load (load_start już czeka — sleep był zbędny)
-                    tab.wait.load_start(timeout=10)
+                    tab.wait.load_start(timeout=PAGE_LOAD_TIMEOUT)
 
                     # Get section HTML
                     section_content = tab.html
@@ -706,9 +815,20 @@ class Scraper:
                     "Database URL not provided or found in environment variables."
                 )
 
-            print(f"Connecting to database at {db_url}...")
+            logger.info(
+                "database_connection_started",
+                extra={"context": {"configured": True}},
+            )
             self.engine = create_engine(db_url)
             self.Session = scoped_session(sessionmaker(bind=self.engine))
+            self._seed_environment_proxy()
+            self.session_manager = BrowserSessionManager(
+                create_fresh_browser,
+                USER_AGENTS,
+                max_requests=SESSION_MAX_REQUESTS,
+                max_age_seconds=SESSION_MAX_AGE_SECONDS,
+                logger=logger,
+            )
             print("Database connection successful")
 
             # URLs used for scraping (kept for reference)
@@ -724,8 +844,77 @@ class Scraper:
             print(f"Scraper initialization failed: {self.initialization_error}")
             self.engine = None
             self.Session = None
+            self.session_manager = None
 
     # ------- Proxy management methods -------
+
+    def _seed_environment_proxy(self):
+        """Idempotently add the environment proxy before workers start.
+
+        Each worker calls this during setup. A unique credential hash and the
+        IntegrityError fallback make simultaneous first-start inserts safe.
+        Existing counters and cookies are preserved.
+        """
+        settings = load_proxy_settings()
+        if settings is None:
+            return False
+
+        proxy_id = self._hash_proxy(
+            settings.host, settings.port, settings.username, settings.password
+        )
+        session = self.Session()
+        try:
+            existing_proxy = session.query(Proxy).filter_by(id=proxy_id).first()
+
+            # When one environment proxy is explicitly marked authoritative,
+            # remove obsolete database proxies before workers can select them.
+            # The current proxy is preserved so its cookies and counters survive.
+            if settings.replace_existing:
+                session.query(Proxy).filter(
+                    Proxy.id != proxy_id,
+                    Proxy.is_direct.is_(False),
+                ).delete(synchronize_session=False)
+
+            if existing_proxy is not None:
+                session.commit()
+                return True
+
+            session.add(
+                Proxy(
+                    id=proxy_id,
+                    host=settings.host,
+                    port=settings.port,
+                    username=settings.username,
+                    password=settings.password,
+                    in_use=False,
+                    call_count=0,
+                    failure_count=0,
+                    cookies_valid=False,
+                )
+            )
+            try:
+                session.commit()
+            except IntegrityError:
+                # Another worker inserted the same proxy after our initial query.
+                session.rollback()
+                if session.query(Proxy).filter_by(id=proxy_id).first() is None:
+                    raise
+                if settings.replace_existing:
+                    session.query(Proxy).filter(
+                        Proxy.id != proxy_id,
+                        Proxy.is_direct.is_(False),
+                    ).delete(synchronize_session=False)
+                    session.commit()
+
+            logger.info(
+                "environment_proxy_ready",
+                extra={
+                    "context": {"host": settings.host, "port": settings.port}
+                },
+            )
+            return True
+        finally:
+            session.close()
 
     def get_all_proxies(self):
         """Get all proxies in the database"""
@@ -834,7 +1023,8 @@ class Scraper:
     def scrape_book(self, code, number, digit):
         """
         High-level method to scrape a book using DrissionPage
-        Creates a FRESH browser for each book to avoid fingerprint detection.
+        Reuses a bounded browser session so cookies and headers remain stable,
+        then rotates the session periodically or after a block/network failure.
 
         Args:
             code: Department code
@@ -851,7 +1041,7 @@ class Scraper:
         try:
             start_time = time.time()
             retry_count = 0
-            max_retries = 2
+            max_retries = EXTERNAL_RETRY_ATTEMPTS
 
             # Check for available proxies
             all_proxies = session.query(Proxy).all()
@@ -870,6 +1060,7 @@ class Scraper:
                     continue
 
                 retry_count += 1
+                invalidate_session = False
 
                 # Anti-detection: staggered delay between books
                 delay = random.uniform(BOOK_DELAY_MIN, BOOK_DELAY_MAX)
@@ -885,14 +1076,26 @@ class Scraper:
                         flush=True,
                     )
 
-                    # Create FRESH browser for each book (different fingerprint)
-                    browser = create_fresh_browser(proxy)
+                    # Reuse cookies, headers, and browser identity for a bounded
+                    # session. Rotation occurs by age/request count or on blocking.
+                    browser = self.session_manager.acquire(proxy)
                     if not browser or not browser.process_id:
-                        print(
-                            "🚨 CRITICAL: Cannot create browser instance.", flush=True
+                        error = NetworkError(
+                            "Browser process could not be started",
+                            operation="government_site.create_browser",
+                            context={"book": f"{code}/{number}/{digit}"},
                         )
+                        log_error(logger, error)
                         self._increment_failure_count(proxy, session)
                         self.release_proxy(proxy, session)
+                        time.sleep(
+                            backoff_delay(
+                                retry_count,
+                                base=EXTERNAL_RETRY_BASE,
+                                maximum=EXTERNAL_RETRY_MAX,
+                                jitter=0.25,
+                            )
+                        )
                         continue
 
                     # Scrape using the browser directly (no tabs - simpler)
@@ -900,12 +1103,24 @@ class Scraper:
 
                     # Handle results
                     if result["success"] == "2":  # Rejected/Blocked
-                        print(
-                            f"🚫 BLOCKED: Server rejected request for {code}/{number}/{digit}",
-                            flush=True,
+                        invalidate_session = True
+                        error = CaptchaError(
+                            "Government site rejected the request",
+                            operation="government_site.scrape_book",
+                            context={"book": f"{code}/{number}/{digit}"},
                         )
+                        GOVERNMENT_SITE_CIRCUIT.record_success()
+                        log_error(logger, error)
                         self._increment_failure_count(proxy, session)
                         self.release_proxy(proxy, session)
+                        time.sleep(
+                            backoff_delay(
+                                retry_count,
+                                base=EXTERNAL_RETRY_BASE,
+                                maximum=EXTERNAL_RETRY_MAX,
+                                jitter=0.25,
+                            )
+                        )
                         continue
 
                     elif result["success"] == "0" and result.get("code") == "not-found":
@@ -913,6 +1128,7 @@ class Scraper:
                             f"📋 NOT FOUND: Book {code}/{number}/{digit} does not exist",
                             flush=True,
                         )
+                        GOVERNMENT_SITE_CIRCUIT.record_success()
                         self.release_proxy(proxy, session)
                         return result
 
@@ -921,18 +1137,42 @@ class Scraper:
                             f"✅ SUCCESS: Book {code}/{number}/{digit} downloaded",
                             flush=True,
                         )
+                        GOVERNMENT_SITE_CIRCUIT.record_success()
                         self.release_proxy(proxy, session)
                         return result
 
                     elif result.get("code") == "incapsula-block":
-                        print(
-                            f"🚫 INCAPSULA BLOCK: {code}/{number}/{digit} - retrying",
-                            flush=True,
+                        invalidate_session = True
+                        error = CaptchaError(
+                            "Government site presented an Incapsula challenge",
+                            operation="government_site.scrape_book",
+                            context={"book": f"{code}/{number}/{digit}"},
                         )
+                        GOVERNMENT_SITE_CIRCUIT.record_success()
+                        log_error(logger, error)
                         self._increment_failure_count(proxy, session)
                         self.release_proxy(proxy, session)
-                        # Krótki cooldown — residential auto-IP zmienia IP na każdy request
-                        time.sleep(random.uniform(2, 4))
+                        time.sleep(
+                            backoff_delay(
+                                retry_count,
+                                base=EXTERNAL_RETRY_BASE,
+                                maximum=EXTERNAL_RETRY_MAX,
+                                jitter=0.25,
+                            )
+                        )
+                        continue
+
+                    elif result.get("code") == "circuit-open":
+                        # An open circuit is a site-wide pause, not a failed book.
+                        # Do not consume this book's retry budget while waiting for
+                        # the single half-open recovery probe.
+                        retry_count = max(0, retry_count - 1)
+                        retry_after = max(0.1, float(result.get("retry_after", 1)))
+                        print(
+                            f"Government-site circuit open; retrying after {retry_after:.1f}s",
+                            flush=True,
+                        )
+                        time.sleep(retry_after)
                         continue
 
                     # Other failure
@@ -943,22 +1183,66 @@ class Scraper:
                     )
                     self._increment_failure_count(proxy, session)
                     self.release_proxy(proxy, session)
+                    error_type = (
+                        DataError
+                        if failure_code == "structure-changed"
+                        else NetworkError
+                    )
+                    error = error_type(
+                        f"Government site returned failure code '{failure_code}'",
+                        operation="government_site.scrape_book",
+                        context={"book": f"{code}/{number}/{digit}", "result_code": failure_code},
+                    )
+                    if isinstance(error, NetworkError):
+                        invalidate_session = True
+                        GOVERNMENT_SITE_CIRCUIT.record_failure()
+                    else:
+                        GOVERNMENT_SITE_CIRCUIT.record_success()
+                    log_error(logger, error)
+                    if error.retryable:
+                        time.sleep(
+                            backoff_delay(
+                                retry_count,
+                                base=EXTERNAL_RETRY_BASE,
+                                maximum=EXTERNAL_RETRY_MAX,
+                                jitter=0.25,
+                            )
+                        )
+                    else:
+                        return result
 
                 except Exception as e:
-                    print(f"🚨 EXCEPTION in scrape_book: {str(e)}", flush=True)
-                    traceback.print_exc()
+                    invalidate_session = True
+                    error = NetworkError(
+                        "Unexpected failure while calling the government site",
+                        operation="government_site.scrape_book",
+                        context={
+                            "book": f"{code}/{number}/{digit}",
+                            "cause": type(e).__name__,
+                        },
+                    )
+                    GOVERNMENT_SITE_CIRCUIT.record_failure()
+                    log_error(logger, error, exc_info=True)
                     if proxy:
                         self._increment_failure_count(proxy, session)
                         self.release_proxy(proxy, session)
+                    time.sleep(
+                        backoff_delay(
+                            retry_count,
+                            base=EXTERNAL_RETRY_BASE,
+                            maximum=EXTERNAL_RETRY_MAX,
+                            jitter=0.25,
+                        )
+                    )
 
                 finally:
-                    # Always close the browser completely
+                    # Persist cookies after every book. Broken or challenged
+                    # sessions are discarded so poisoned state is never reused.
                     if browser:
-                        try:
-                            browser.quit()
-                            print("DEBUG: Browser closed completely.", flush=True)
-                        except Exception as e:
-                            print(f"DEBUG: Error closing browser: {e}", flush=True)
+                        if invalidate_session:
+                            self.session_manager.invalidate(proxy)
+                        else:
+                            self.session_manager.checkpoint(proxy)
                         browser = None
 
                     if proxy:
@@ -976,11 +1260,6 @@ class Scraper:
             return {"success": "0", "code": "timeout"}
 
         finally:
-            if browser:
-                try:
-                    browser.quit()
-                except:
-                    pass
             if proxy:
                 self.release_proxy(proxy, session)
             try:
@@ -1053,9 +1332,9 @@ class Scraper:
                 session.close()
 
     def close(self):
-        """Close database session (browser is now closed per-book)"""
-        # No singleton browser to close - each book creates and closes its own
-        pass
+        """Close the reusable browser session owned by this scraper."""
+        if self.session_manager:
+            self.session_manager.close()
 
     def __del__(self):
         """Clean up resources when object is destroyed"""
@@ -1066,9 +1345,38 @@ class Scraper:
         try:
             import requests
 
-            response = requests.get(self.pre_search_url, timeout=10)
+            def request_health():
+                try:
+                    response = requests.get(
+                        self.pre_search_url,
+                        timeout=(min(5, PAGE_LOAD_TIMEOUT), PAGE_LOAD_TIMEOUT),
+                    )
+                    if response.status_code >= 500:
+                        raise NetworkError(
+                            f"Government site returned HTTP {response.status_code}",
+                            operation="government_site.health",
+                            context={"status_code": response.status_code},
+                        )
+                    return response
+                except requests.RequestException as error:
+                    raise NetworkError(
+                        "Government site health request failed",
+                        operation="government_site.health",
+                    ) from error
+
+            response = retry_external_call(
+                request_health,
+                operation="government_site.health",
+                attempts=EXTERNAL_RETRY_ATTEMPTS,
+                base_delay=EXTERNAL_RETRY_BASE,
+                max_delay=EXTERNAL_RETRY_MAX,
+                jitter=0.25,
+                circuit_breaker=GOVERNMENT_SITE_CIRCUIT,
+                logger=logger,
+            )
             if response.status_code == 200:
                 if "przerwa serwisowa" in response.text:
+                    GOVERNMENT_SITE_CIRCUIT.trip()
                     return {
                         "status": "maintenance",
                         "message": "Site is in maintenance mode",
@@ -1078,5 +1386,13 @@ class Scraper:
                 "status": "error",
                 "message": f"Site returned status {response.status_code}",
             }
-        except Exception as e:
-            return {"status": "error", "message": str(e)}
+        except CircuitOpenError as error:
+            log_error(logger, error)
+            return {
+                "status": "circuit-open",
+                "message": str(error),
+                "retry_after": error.retry_after,
+            }
+        except NetworkError as error:
+            log_error(logger, error)
+            return {"status": "error", "message": str(error)}

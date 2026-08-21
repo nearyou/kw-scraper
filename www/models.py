@@ -63,7 +63,8 @@ class TaskQueue(db.Model):
     start_from = db.Column(db.Integer, default=0, nullable=False)
     end_at = db.Column(db.Integer, default=999999, nullable=False)
     priority = db.Column(db.Integer, default=0)  # Higher number = higher priority
-    status = db.Column(db.String(20), default='pending')  # pending, in_progress, stopping, stopped, completed
+    # dead_letter means processing failed after all three retries.
+    status = db.Column(db.String(20), default='pending')  # pending, in_progress, stopping, stopped, completed, dead_letter
     books_total = db.Column(db.Integer, default=0)
     books_processed = db.Column(db.Integer, default=0)
     last_scraped_book = db.Column(db.String(50), nullable=True)  # Stores the last book number that was scraped
@@ -77,6 +78,23 @@ class TaskQueue(db.Model):
     def get_next_pending_task(cls):
         """Get the highest priority pending task"""
         return cls.query.filter_by(status='pending').order_by(desc(cls.priority), cls.date_created).first()
+
+    @classmethod
+    def claim_next_pending_task(cls):
+        """Atomically reserve one task so competing managers cannot duplicate it."""
+        task = (
+            cls.query.filter_by(status='pending')
+            .order_by(desc(cls.priority), cls.date_created)
+            .with_for_update(skip_locked=True)
+            .first()
+        )
+        if task is not None:
+            task.status = 'in_progress'
+            task.books_total = task.end_at - task.start_from + 1
+            db.session.commit()
+        else:
+            db.session.rollback()
+        return task
     
     def __repr__(self):
         return f'<TaskQueue {self.id} | Department: {self.department_code} | Status: {self.status}>'
@@ -259,6 +277,23 @@ class IdleTasks(db.Model):
     def get_next_pending_task(cls):
         """Get the next pending idle task"""
         return cls.query.filter_by(status='pending').order_by(cls.created_at).first()
+
+    @classmethod
+    def claim_next_pending_task(cls):
+        """Atomically reserve an idle task across queue-manager processes."""
+        task = (
+            cls.query.filter_by(status='pending')
+            .order_by(cls.created_at)
+            .with_for_update(skip_locked=True)
+            .first()
+        )
+        if task is not None:
+            task.status = 'in_progress'
+            task.started_at = func.now()
+            db.session.commit()
+        else:
+            db.session.rollback()
+        return task
     
     @classmethod
     def get_active_task(cls):

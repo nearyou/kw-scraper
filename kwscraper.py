@@ -1,4 +1,5 @@
 import concurrent.futures
+import logging
 import os
 import queue
 import random
@@ -8,6 +9,7 @@ import sys
 import threading
 import time
 from datetime import datetime, timedelta
+from enum import Enum
 
 import requests
 import tenacity
@@ -18,12 +20,25 @@ parent_dir = os.path.dirname(os.path.abspath(__file__))
 if parent_dir not in sys.path:
     sys.path.append(parent_dir)
 
+load_dotenv()
+from logging_config import configure_logging, correlation_context
+
+if __name__ == "__main__":
+    configure_logging(service="scraper", capture_streams=True)
+
 # Import after setting up the path
 from helper import get_control_digit, get_formatted_book_number
 from kwparser import parse_directory
 from scraping_functions.scraper import Scraper
+from scraping_functions.errors import DataError, NetworkError, log_error
+from scraping_functions.validation import (
+    validate_book_identifier,
+    validate_html_document,
+    validate_scrape_result,
+)
+from scraping_functions.worker_pool import ThreadLocalResourcePool
 
-load_dotenv()
+logger = logging.getLogger(__name__)
 
 # Get environment variables - now using DATABASE_URL instead of MONGO_URI
 DATABASE_URL = os.getenv(
@@ -58,13 +73,24 @@ lock = threading.Lock()
 download_counter = {"processed": 0, "success": 0, "failed": 0, "not_found": 0}
 # Global counter for tracking parsing progress
 parsing_counter = {"processed": 0, "success": 0, "failed": 0}
+
+
+class DownloadOutcome(Enum):
+    SUCCESS = "success"
+    NOT_FOUND = "not_found"
+    FAILED = "failed"
+
+    def __bool__(self):
+        return self is not self.FAILED
 # Maximum number of concurrent processes - now configurable via env vars
 # Increased conservative defaults to better utilize a 4 vCPU machine.
 # Adjust via environment variables if you see resource contention.
 MAX_DOWNLOAD_WORKERS = int(os.getenv("DOWNLOAD_WORKERS", "6"))  # Download workers
 MAX_PARSING_WORKERS = int(os.getenv("PARSING_WORKERS", "3"))  # Parse workers
 def save_page_source(department_code, book_number, control_digit, section, page_source):
-    """Save scraped HTML content to a file (sanitized)"""
+    """Validate and atomically save scraped HTML content."""
+    validate_book_identifier(department_code, book_number, control_digit)
+    cleaned_html = validate_html_document(page_source, section=section)
     directory_name = f"{department_code}-{book_number}-{control_digit}"
     output_dir = os.path.join(OUTPUTS_DIRNAME, directory_name)
 
@@ -72,17 +98,48 @@ def save_page_source(department_code, book_number, control_digit, section, page_
         os.makedirs(output_dir)
 
     filename = os.path.join(output_dir, f"{section}.html")
-    # Sanitize HTML before saving
-    cleaned_html = page_source
-    with open(filename, "w", encoding="utf-8") as file:
+    temporary_filename = f"{filename}.{threading.get_ident()}.tmp"
+    with open(temporary_filename, "w", encoding="utf-8") as file:
         file.write(cleaned_html)
+        file.flush()
+        os.fsync(file.fileno())
+    os.replace(temporary_filename, filename)
+
+
+def save_debug_html(book_id, page_source):
+    """Best-effort diagnostic capture that never hides the original site error."""
+    safe_book_id = "".join(
+        character for character in str(book_id) if character.isalnum() or character in "-_"
+    )
+    try:
+        debug_directory = os.path.join(OUTPUTS_DIRNAME, "debug")
+        os.makedirs(debug_directory, exist_ok=True)
+        with open(
+            os.path.join(debug_directory, f"{safe_book_id}.html"),
+            "w",
+            encoding="utf-8",
+        ) as debug_file:
+            debug_file.write(page_source)
+    except OSError as error:
+        log_error(
+            logger,
+            DataError(
+                "Debug response HTML could not be saved",
+                operation="scraper.save_debug_html",
+                context={"book": safe_book_id, "cause": type(error).__name__},
+            ),
+            exc_info=True,
+        )
 
 
 def setup_scraper():
     """Set up and configure the scraper with proxy if not in test mode"""
     try:
         # Initialize scraper with PostgreSQL connection (DrissionPage - no Splash needed)
-        scraper = Scraper(db_url=DATABASE_URL, timeout=180)
+        scraper = Scraper(
+            db_url=DATABASE_URL,
+            timeout=float(os.getenv("SCRAPE_TIMEOUT", "180")),
+        )
 
         # Check if we have any proxies configured
         proxies = scraper.get_all_proxies()
@@ -132,16 +189,27 @@ def setup_scraper():
         return scraper
 
     except ConnectionError as e:
-        print(f"Error: {e}")
-        print("Cannot continue without proper connections. Exiting...")
-        sys.exit(1)
+        error = NetworkError(
+            "Scraper setup could not connect to an external service",
+            operation="scraper.setup",
+            context={"cause": type(e).__name__},
+        )
+        log_error(logger, error, exc_info=True)
+        raise error from e
     except Exception as e:
-        print(f"Unexpected error setting up scraper: {e}")
-        print("Cannot continue. Exiting...")
-        sys.exit(1)
+        error = DataError(
+            "Scraper setup failed while loading configuration or proxy data",
+            operation="scraper.setup",
+            context={"cause": type(e).__name__},
+        )
+        log_error(logger, error, exc_info=True)
+        raise error from e
 
 
-@tenacity.retry(wait=tenacity.wait_fixed(5), stop=tenacity.stop_after_attempt(3))
+@tenacity.retry(
+    wait=tenacity.wait_exponential(multiplier=1, min=1, max=8),
+    stop=tenacity.stop_after_attempt(3),
+)
 def run_scraper(
     scraper, department_code: str, ekw_number, start_from: int = 0, end_at: int = 999999
 ):
@@ -190,6 +258,7 @@ def run_scraper(
         elif result["success"] == "1":
             # Book found, save all sections
             try:
+                validate_scrape_result(result)
                 # Save main search results page (equivalent to the initial page in original)
                 if "main" in result and result["main"]:
                     save_page_source(
@@ -226,10 +295,16 @@ def run_scraper(
                 return True
 
             except Exception as e:
-                # This matches the original error handler for section processing
-                print(
-                    f"Error clicking or processing sections for book number {ekw_number}. Skipping..."
+                error = DataError(
+                    "Scraped book sections could not be saved",
+                    operation="scraper.save_sections",
+                    context={
+                        "department_code": department_code,
+                        "book_number": str(ekw_number),
+                        "cause": type(e).__name__,
+                    },
                 )
+                log_error(logger, error, exc_info=True)
                 book_result = "failure"  # Set result for timing stats
                 # Original would have continued to next book in this case
                 return True
@@ -286,6 +361,27 @@ def cleanup_local_folder(directory_path):
 
 
 def download_worker(scraper, department_code, ekw_number):
+    """Trace all work for one book with a stable correlation ID."""
+    correlation_id = f"book-{department_code}-{ekw_number}"
+    with correlation_context(correlation_id):
+        logger.info(
+            "book_processing_started",
+            extra={
+                "context": {
+                    "department_code": department_code,
+                    "book_number": ekw_number,
+                }
+            },
+        )
+        outcome = _download_worker(scraper, department_code, ekw_number)
+        logger.info(
+            "book_processing_finished",
+            extra={"context": {"outcome": outcome.value}},
+        )
+        return outcome
+
+
+def _download_worker(scraper, department_code, ekw_number):
     """Worker function for downloading and parsing a single book"""
     try:
         # Format book number and control digit
@@ -304,8 +400,7 @@ def download_worker(scraper, department_code, ekw_number):
                 with lock:
                     download_counter["not_found"] += 1
                     download_counter["processed"] += 1
-                # Return True for not-found books to treat them as processed
-                return True
+                return DownloadOutcome.NOT_FOUND
 
             # Handle other errors
             print(
@@ -319,11 +414,12 @@ def download_worker(scraper, department_code, ekw_number):
             with lock:
                 download_counter["failed"] += 1
                 download_counter["processed"] += 1
-            return None
+            return DownloadOutcome.FAILED
 
         elif result["success"] == "1":
             # Book found, save all sections to files
             try:
+                validate_scrape_result(result)
                 # Save main search results page
                 if "main" in result and result["main"]:
                     save_page_source(
@@ -377,35 +473,35 @@ def download_worker(scraper, department_code, ekw_number):
                             parsing_counter["processed"] += 1
                         # Cleanup invalid data
                         cleanup_local_folder(directory_path)
-                        return None  # Return failure
+                        return DownloadOutcome.FAILED
 
                 except Exception as e:
                     print(f"[Parser] Error parsing book {book_id}: {e}")
                     with lock:
                         parsing_counter["failed"] += 1
                         parsing_counter["processed"] += 1
-                    return None
+                    return DownloadOutcome.FAILED
 
                 # Update counters
                 with lock:
                     download_counter["success"] += 1
                     download_counter["processed"] += 1
 
-                return True  # Indicates success
+                return DownloadOutcome.SUCCESS
 
             except Exception as e:
                 print(f"[Downloader] Error saving book {book_id}: {e}")
                 with lock:
                     download_counter["failed"] += 1
                     download_counter["processed"] += 1
-                return None
+                return DownloadOutcome.FAILED
 
     except Exception as e:
         print(f"[Downloader] Unexpected error for book {ekw_number}: {e}")
         with lock:
             download_counter["failed"] += 1
             download_counter["processed"] += 1
-        return None
+        return DownloadOutcome.FAILED
 
 
 def print_timing_report():
@@ -476,8 +572,8 @@ def main():
     start_from = int(input("Enter the starting book number (e.g., 0): "))
     end_at = int(input("Enter the ending book number (e.g., 1000): "))
 
-    # Create and configure the scraper
-    scraper = setup_scraper()
+    # Stateful browsers are owned by one executor thread each.
+    scraper_pool = ThreadLocalResourcePool(setup_scraper, logger=logger)
 
     try:
         # Start timing if in test mode
@@ -497,17 +593,19 @@ def main():
             )
 
             pending = {}
-            completed = set()
             book_iter = iter(range(start_from, end_at + 1))
+
+            def process_book(number):
+                return download_worker(
+                    scraper_pool.get(), department_code, number
+                )
 
             def submit_next():
                 try:
                     n = next(book_iter)
                 except StopIteration:
                     return None
-                f = download_executor.submit(
-                    download_worker, scraper, department_code, n
-                )
+                f = download_executor.submit(process_book, n)
                 pending[f] = n
                 return f
 
@@ -519,23 +617,25 @@ def main():
             except Exception:
                 pass
 
-            # Process as futures complete, submitting new ones to keep window filled
-            for fut in concurrent.futures.as_completed(list(pending.keys())):
-                book_num = pending.pop(fut)
-                completed.add(fut)
-                try:
-                    fut.result()
-                except Exception as e:
-                    print(f"Error processing book {book_num}: {e}")
-
-                # Submit next to refill window
-                submit_next()
+            # Keep tracking futures added after the initial bounded window.
+            while pending:
+                done, _ = concurrent.futures.wait(
+                    tuple(pending),
+                    return_when=concurrent.futures.FIRST_COMPLETED,
+                )
+                for future in done:
+                    book_num = pending.pop(future)
+                    try:
+                        future.result()
+                    except Exception as e:
+                        print(f"Error processing book {book_num}: {e}")
+                    submit_next()
 
     except KeyboardInterrupt:
         print("\nScraping interrupted by user.")
     finally:
         # Clean up resources
-        scraper.close()
+        scraper_pool.close_all()
 
         # End timing if in test mode
         if TEST_MODE:
